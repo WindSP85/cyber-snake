@@ -2,8 +2,9 @@
    NEON://SNAKE — FX layer (SPEC §7)
    Neon particles, screen shake, band glitch, fullscreen flash.
 
-   CS.FX.draw() runs on top of the scene in logical 900x600
-   pixels (game.js scales the context for devicePixelRatio).
+   CS.FX.draw() runs on top of the scene in logical canvas pixels —
+   GRID_W*CELL x GRID_H*CELL (game.js scales the context for
+   devicePixelRatio and reports the live size via setSize, T13).
    Screen shake translates the whole canvas element via CSS:
    the entire scene trembles while the context transform set
    by game.js stays intact; without a DOM (headless) it is a
@@ -16,8 +17,8 @@
 
   /* ---------- tuning ---------- */
 
-  const W = 900;                    // logical canvas size, px
-  const H = 600;
+  let width = 900;                  // logical canvas size, px (T13: setSize)
+  let height = 600;
 
   const DEFAULT_COUNT = 10;         // burst() particle fallback
   const MAX_PARTICLES = 600;        // hard cap against unbounded growth
@@ -80,7 +81,7 @@
     g.save();
     g.globalAlpha = FLASH_ALPHA * k * k;   // fast fade towards the end
     g.fillStyle = flashColor;
-    g.fillRect(0, 0, W, H);
+    g.fillRect(0, 0, width, height);
     g.restore();
   }
 
@@ -125,21 +126,21 @@
     const bands = BANDS_MIN + Math.floor(Math.random() * (BANDS_MAX - BANDS_MIN + 1));
     for (let i = 0; i < bands; i++) {
       const bh = BAND_H_MIN + Math.random() * (BAND_H_MAX - BAND_H_MIN);
-      const by = Math.random() * (H - bh);
+      const by = Math.random() * (height - bh);
       const shift = (Math.random() * 2 - 1) * BAND_SHIFT * inten;
       g.globalAlpha = 0.05 + 0.11 * Math.random() * inten;
       g.fillStyle = '#00f0ff';
-      g.fillRect(shift, by, W, bh);
+      g.fillRect(shift, by, width, bh);
       g.fillStyle = '#ff2bd6';
-      g.fillRect(-shift, by, W, bh);
+      g.fillRect(-shift, by, width, bh);
     }
     const strokes = 3 + Math.floor(Math.random() * 5);
     for (let i = 0; i < strokes; i++) {
       g.globalAlpha = 0.1 + 0.3 * Math.random() * inten;
       g.fillStyle = Math.random() < 0.5 ? '#00f0ff' : '#ff2bd6';
       g.fillRect(
-        Math.random() * W,
-        Math.random() * H,
+        Math.random() * width,
+        Math.random() * height,
         1 + Math.random() * 1.5,
         8 + Math.random() * 40
       );
@@ -150,6 +151,15 @@
   /* ---------- public API (SPEC §7) ---------- */
 
   CS.FX = {
+    /* Feature T13: the arena size follows the live grid — game.js
+       calls this on boot and on every grid change. */
+    setSize: function (w, h) {
+      const w2 = Math.round(Number(w));
+      const h2 = Math.round(Number(h));
+      if (isFinite(w2) && w2 > 0) width = w2;
+      if (isFinite(h2) && h2 > 0) height = h2;
+    },
+
     /* Advance every live effect. Dead particles are compacted
        in place: no leaks, no reallocations for the survivors. */
     update: function (dt) {
@@ -205,8 +215,8 @@
         particles.splice(0, particles.length + count - MAX_PARTICLES);
       }
       const col = (typeof color === 'string' && color) ? color : '#00f0ff';
-      const x0 = isFinite(px) ? px : W / 2;
-      const y0 = isFinite(py) ? py : H / 2;
+      const x0 = isFinite(px) ? px : width / 2;
+      const y0 = isFinite(py) ? py : height / 2;
       for (let i = 0; i < count; i++) {
         const a = Math.random() * Math.PI * 2;
         const sp = SPEED_MIN + Math.random() * (SPEED_MAX - SPEED_MIN);

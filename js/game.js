@@ -16,8 +16,10 @@
 
   /* ---------- tuning constants ---------- */
 
-  const GRID_W = 30;
-  const GRID_H = 20;
+  /* feature T13: adaptive arena — the defaults are the classic desktop
+     grid; computeGrid() re-derives both from the screen proportions */
+  let GRID_W = 30;
+  let GRID_H = 20;
   const CELL = 30;                  // canvas: GRID_W*CELL x GRID_H*CELL
   const MAX_DT = 0.05;              // main loop dt clamp, seconds
 
@@ -981,8 +983,12 @@
   function spawnBank() {
     const occ = occupiedKeys();
     const free = [];
-    for (let y = BANK_ZONE.y0; y <= BANK_ZONE.y1; y++) {
-      for (let x = BANK_ZONE.x0; x <= BANK_ZONE.x1; x++) {
+    // feature T13: the zone keeps its 2-cell wall margin on any grid
+    // (identical to the 30x20 defaults on the classic desktop field)
+    const zx1 = Math.min(BANK_ZONE.x1, GRID_W - 3);
+    const zy1 = Math.min(BANK_ZONE.y1, GRID_H - 3);
+    for (let y = BANK_ZONE.y0; y <= zy1; y++) {
+      for (let x = BANK_ZONE.x0; x <= zx1; x++) {
         if (!occ.has(key(x, y))) free.push({ x: x, y: y });
       }
     }
@@ -1156,6 +1162,7 @@
   /* ---------- state transitions ---------- */
 
   function startGame() {
+    applyGridChange(); // feature T13: the field follows the current screen
     hideScoreSave();   // feature T10: a fresh run drops the save block
     snake = [];
     const cx = Math.floor(GRID_W / 2);
@@ -1919,6 +1926,72 @@
     g.restore();
   }
 
+  /* ---------- feature T13: adaptive arena ---------- */
+
+  /* The arena keeps the classic ~600-cell density but takes its
+     proportions from the screen: desktop / landscape clamps the aspect
+     at 1.5, which yields exactly the canonical 30x20; portrait and
+     intermediate screens get their own field. */
+  function computeGrid() {
+    const portrait = window.innerHeight > window.innerWidth * 1.15;
+    const reserve = portrait ? 360 : 90; // hud+dpad in portrait, hud in landscape
+    const availH = Math.max(200, window.innerHeight - reserve);
+    const aspect = Math.max(0.55, Math.min(1.5, window.innerWidth / availH));
+    const CELLS = 600;
+    let w = Math.round(Math.sqrt(CELLS * aspect));
+    let h = Math.round(Math.sqrt(CELLS / aspect));
+    w = Math.max(14, Math.min(38, w));
+    h = Math.max(14, Math.min(38, h));
+    return { w: w, h: h };
+  }
+
+  /* Recompute the grid; true only when the values actually changed */
+  function applyGrid() {
+    const next = computeGrid();
+    if (next.w === GRID_W && next.h === GRID_H) return false;
+    GRID_W = next.w;
+    GRID_H = next.h;
+    return true;
+  }
+
+  /* Canvas backing store for the current grid. HiDPI: the backstore is
+     scaled by devicePixelRatio, all modules keep drawing in logical
+     GRID_W*CELL x GRID_H*CELL coordinates via setTransform */
+  function resizeCanvas() {
+    if (!canvas || !g) return;
+    const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    canvas.width = Math.round(GRID_W * CELL * dpr);
+    canvas.height = Math.round(GRID_H * CELL * dpr);
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  /* The stage ratio follows the live grid (css sizes .layout/.stage) */
+  function cssVars() {
+    if (!document.documentElement || !document.documentElement.style) return;
+    document.documentElement.style.setProperty('--field-ratio', GRID_W + ' / ' + GRID_H);
+    document.documentElement.style.setProperty('--field-aspect', String(GRID_W / GRID_H));
+  }
+
+  /* One grid change = canvas + fx + css all in sync */
+  function applyGridChange() {
+    if (!applyGrid()) return false;
+    resizeCanvas();
+    CS.FX.setSize(GRID_W * CELL, GRID_H * CELL);
+    cssVars();
+    return true;
+  }
+
+  /* Orientation flips wait for the resize storm to settle; the grid
+     never changes mid-run — the next startGame picks it up */
+  let resizeDebounce = 0;
+  function onWindowResize() {
+    clearTimeout(resizeDebounce);
+    resizeDebounce = setTimeout(function () {
+      if (state !== 'menu' && state !== 'gameover' && state !== 'lang') return;
+      applyGridChange();
+    }, 300);
+  }
+
   /* ---------- boot ---------- */
 
   function boot() {
@@ -1928,16 +2001,17 @@
     canvas = document.getElementById('game-canvas');
     if (canvas) {
       g = canvas.getContext('2d');
-      // HiDPI: the backstore is scaled by devicePixelRatio, all modules
-      // keep drawing in logical 900x600 coordinates via setTransform
-      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-      canvas.width = Math.round(GRID_W * CELL * dpr);
-      canvas.height = Math.round(GRID_H * CELL * dpr);
-      g.setTransform(dpr, 0, 0, dpr, 0, 0);
       canvas.addEventListener('touchstart', onTouchStart, { passive: false });
       canvas.addEventListener('touchend', onTouchEnd, { passive: false });
       canvas.addEventListener('click', onCanvasClick);
     }
+
+    // feature T13: grid, canvas, fx and css sizing for this screen
+    applyGrid();
+    resizeCanvas();
+    CS.FX.setSize(GRID_W * CELL, GRID_H * CELL);
+    cssVars();
+    window.addEventListener('resize', onWindowResize);
 
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('pointerdown', function () { firstGesture(); });

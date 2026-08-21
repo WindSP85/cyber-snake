@@ -53,19 +53,21 @@ body::before {
   pointer-events: none;
 }
 
-/* ---------- Layout: HUD bar above the 3:2 arena ---------- */
+/* ---------- Layout: HUD bar above the arena ----------
+   Feature T13: --field-ratio / --field-aspect are set by game.js
+   from the live grid; the fallbacks are the classic 30x20 (1.5). */
 
 .layout {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  width: min(900px, 96vw, calc((100vh - 72px) * 1.5));
+  width: min(900px, 96vw, calc((100vh - 72px) * var(--field-aspect, 1.5)));
 }
 
 .stage {
   position: relative;
   width: 100%;
-  aspect-ratio: 3 / 2;
+  aspect-ratio: var(--field-ratio, 3 / 2);
   background: var(--bg);
   border: 1px solid rgba(0, 240, 255, .25);
   box-shadow:
@@ -1139,20 +1141,21 @@ body::before {
   grid-area: right;
 }
 
-@media (orientation: portrait) and (max-width: 900px) {
-  /* центрируем стек: арена сверху, D-pad ниже, воздух делится поровну */
+@media (orientation: portrait) and (max-width: 1100px) {
+  /* мобильная вёрстка: шапка вверху, поле в середине, D-pad прижат к низу */
   body {
     flex-direction: column;
     align-items: center;
-    justify-content: center;
-    gap: 3vh;
-    padding-top: 0;
+    justify-content: flex-start;
+    gap: 8px;
+    padding-top: 6px;
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
 
-  /* полная ширина, но не выше остатка высоты (hud ~52 + D-pad ~230 + воздух) */
+  /* поле тянется на всё свободное место между шапкой и D-pad
+     (резерв: hud ~52 + D-pad ~230 + отступы); T13: пропорции арены — от живой сетки */
   .layout {
-    width: min(96vw, calc((100vh - 360px) * 1.5));
+    width: min(96vw, calc((100vh - 330px) * var(--field-aspect, 0.7)));
   }
 
   .dpad {
@@ -1164,6 +1167,8 @@ body::before {
     gap: 12px;
     width: min(440px, 94vw);
     margin: 0;
+    margin-top: auto; /* прижат к низу экрана любого размера */
+    margin-bottom: max(10px, env(safe-area-inset-bottom, 0px));
   }
 
   .dpad-btn {
