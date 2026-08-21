@@ -217,6 +217,7 @@
       onWarn: function (text) {
         CS.UI.banner(text, true);
         bannerTimer = BANNER_TIME;
+        CS.FX.glitch(0.25);
       },
       onSfx: function (name) {
         CS.Audio.sfx(name);
@@ -239,6 +240,7 @@
       // farewell burst at the boss core (2x2 block center)
       CS.FX.burst((fight.x + 1) * CELL, (fight.y + 1) * CELL, '#ff2d55', 40);
     }
+    CS.FX.shake(8);
     CS.UI.toast('БОСС УНИЧТОЖЕН');
     CS.UI.bossBar(0, 0, false);
     CS.UI.banner(null, false);
@@ -276,6 +278,7 @@
     }
     CS.FX.shake(12);
     CS.FX.glitch(0.6);
+    CS.FX.flash('#ff2d55', 0.25);
   }
 
   function finishGameOver() {
@@ -321,6 +324,8 @@
 
     // boss data charge at the target cell
     if (fight && fight.active && fight.collectCharge(nx, ny)) {
+      CS.FX.burst(nx * CELL + CELL / 2, ny * CELL + CELL / 2, '#00ff9d', 10);
+      CS.FX.shake(4);
       addScore(CHARGE_SCORE); // the fight may be over now (onDefeated ran)
     }
 
@@ -355,6 +360,7 @@
       eaten++;
       growth += 1;
       CS.Audio.sfx('eat');
+      CS.FX.burst(nx * CELL + CELL / 2, ny * CELL + CELL / 2, '#ff2bd6', 7);
       food = null;
       spawnFood();
       if (eaten % FOOD_PER_LEVEL === 0) levelUp();
@@ -365,6 +371,7 @@
     if (bonus && bonus.x === nx && bonus.y === ny) {
       addScore(BONUS_SCORE);
       growth += BONUS_GROW;
+      CS.FX.burst(nx * CELL + CELL / 2, ny * CELL + CELL / 2, '#ffe600', 14);
       bonus = null;
       CS.Audio.sfx('bonus');
     }
@@ -751,6 +758,12 @@
     canvas = document.getElementById('game-canvas');
     if (canvas) {
       g = canvas.getContext('2d');
+      // HiDPI: the backstore is scaled by devicePixelRatio, all modules
+      // keep drawing in logical 900x600 coordinates via setTransform
+      const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+      canvas.width = Math.round(GRID_W * CELL * dpr);
+      canvas.height = Math.round(GRID_H * CELL * dpr);
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
       canvas.addEventListener('touchstart', onTouchStart, { passive: false });
       canvas.addEventListener('touchend', onTouchEnd, { passive: false });
       canvas.addEventListener('click', onCanvasClick);
