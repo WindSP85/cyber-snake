@@ -7,16 +7,17 @@
 
   const CS = window.CS = window.CS || {};
 
-  const SCREENS = ['menu', 'controls', 'pause', 'gameover'];
+  const SCREENS = ['lang', 'menu', 'controls', 'pause', 'gameover'];
   const TOAST_MS = 1600;
-  const HANDLER_KEYS = ['start', 'resume', 'restart', 'menu', 'mute'];
+  const HANDLER_KEYS = ['start', 'resume', 'restart', 'menu', 'mute', 'lang'];
 
   const handlers = {
     start: null,
     resume: null,
     restart: null,
     menu: null,
-    mute: null
+    mute: null,
+    lang: null
   };
 
   let toastTimer = 0;
@@ -47,6 +48,11 @@
     if (typeof handlers[name] === 'function') handlers[name]();
   }
 
+  /* i18n translate (i18n.js always loads before this file) */
+  function t(key) {
+    return CS.I18N && typeof CS.I18N.t === 'function' ? CS.I18N.t(key) : key;
+  }
+
   function updateMuteLabel() {
     const btn = byId('mute-btn');
     if (!btn) return;
@@ -54,7 +60,7 @@
     if (CS.Audio && typeof CS.Audio.getMuted === 'function') {
       muted = !!CS.Audio.getMuted();
     }
-    btn.textContent = muted ? 'Звук: выкл' : 'Звук: вкл';
+    btn.textContent = muted ? t('soundOff') : t('soundOn');
     btn.classList.toggle('muted', muted);
   }
 
@@ -65,6 +71,12 @@
     } catch (e) {
       return 0;
     }
+  }
+
+  /* switch the language and leave the language screen back to the menu */
+  function applyLang(code) {
+    if (CS.I18N && typeof CS.I18N.set === 'function') CS.I18N.set(code);
+    showScreen('menu');
   }
 
   function wire() {
@@ -106,6 +118,18 @@
       fire('mute');
       updateMuteLabel();
     });
+
+    // language screen (feature T7): pick a language, then go to the menu;
+    // the 🌐 button only fires the 'lang' callback — game.js decides
+    bind('btn-lang', function () {
+      fire('lang');
+    });
+    bind('btn-lang-ru', function () {
+      applyLang('ru');
+    });
+    bind('btn-lang-en', function () {
+      applyLang('en');
+    });
   }
 
   function init() {
@@ -115,7 +139,7 @@
   }
 
   CS.UI = {
-    /* 'menu' | 'game' | 'pause' | 'gameover' — switch screen overlays */
+    /* 'lang' | 'menu' | 'game' | 'pause' | 'gameover' — switch screen overlays */
     show: function (name) {
       if (name === 'game' || name === null || name === undefined) {
         showScreen(null);
@@ -186,7 +210,7 @@
       el.classList.toggle('hidden', show === false);
     },
 
-    /* Subscribe to button events: {start, resume, restart, menu, mute} */
+    /* Subscribe to button events: {start, resume, restart, menu, mute, lang} */
     on: function (callbacks) {
       if (!callbacks) return;
       HANDLER_KEYS.forEach(function (key) {

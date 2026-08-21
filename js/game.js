@@ -87,6 +87,11 @@
 
   function key(x, y) { return x + ',' + y; }
 
+  /* i18n translate (i18n.js always loads before this file) */
+  function tr(key, arg) {
+    return CS.I18N && CS.I18N.t ? CS.I18N.t(key, arg) : key;
+  }
+
   function loadBest() {
     try {
       const v = parseInt(window.localStorage.getItem('cs_best'), 10);
@@ -199,7 +204,7 @@
   function levelUp() {
     level++;
     CS.UI.hud({ level: level });
-    CS.UI.toast('УРОВЕНЬ ' + level);
+    CS.UI.toast(tr('toastLevel', level));
     CS.Audio.sfx('levelup');
     if (state !== 'boss') applySpeed(); // tick speed is frozen during a fight
     if (level % BOSS_EVERY === 0) {
@@ -241,7 +246,7 @@
       CS.FX.burst((fight.x + 1) * CELL, (fight.y + 1) * CELL, '#ff2d55', 40);
     }
     CS.FX.shake(8);
-    CS.UI.toast('БОСС УНИЧТОЖЕН');
+    CS.UI.toast(tr('toastBossDown'));
     CS.UI.bossBar(0, 0, false);
     CS.UI.banner(null, false);
     bannerTimer = 0;
@@ -408,7 +413,7 @@
     CS.UI.bossBar(0, 0, false);
     CS.UI.banner(null, false);
     CS.UI.show('game');
-    CS.UI.toast('ПОДКЛЮЧЕНИЕ К СЕТИ...');
+    CS.UI.toast(tr('toastConnect'));
     spawnFood();
     CS.Audio.ensure();
     CS.Audio.sfx('start');
@@ -452,10 +457,21 @@
   function updateMuteButton(muted) {
     const btn = document.getElementById('mute-btn');
     if (!btn) return;
-    btn.textContent = muted ? 'Звук: выкл' : 'Звук: вкл';
+    btn.textContent = muted ? tr('soundOff') : tr('soundOn');
     if (btn.classList && typeof btn.classList.toggle === 'function') {
       btn.classList.toggle('muted', muted);
     }
+  }
+
+  /* feature T7: reopen the language screen from the menu (🌐 button) */
+  function showLangScreen() {
+    CS.UI.show('lang');
+  }
+
+  /* the language choice must be made before Enter can start a game */
+  function langScreenShown() {
+    const el = document.getElementById('screen-lang');
+    return !!el && !el.classList.contains('hidden');
   }
 
   /* ---------- input ---------- */
@@ -497,6 +513,7 @@
       return;
     }
     if (code === 'Enter') {
+      if (langScreenShown()) return; // language first, game later
       if (state === 'menu' || state === 'gameover') startGame();
       return;
     }
@@ -778,22 +795,30 @@
       if (t && t.closest && t.closest('button')) CS.Audio.sfx('click');
     });
 
-    // screen buttons (start / resume / restart / menu / mute)
+    // screen buttons (start / resume / restart / menu / mute / lang)
     CS.UI.on({
       start: startGame,
       restart: startGame,
       resume: resumeGame,
       menu: goMenu,
-      mute: toggleMute
+      mute: toggleMute,
+      lang: showLangScreen
     });
 
     // #btn-pause is not part of the CS.UI.on contract — wire it directly
     const pauseBtn = document.getElementById('btn-pause');
     if (pauseBtn) pauseBtn.addEventListener('click', togglePauseButton);
 
+    // a language switch re-renders the sound button caption
+    if (CS.I18N && typeof CS.I18N.onChange === 'function') {
+      CS.I18N.onChange(function () {
+        updateMuteButton(CS.Audio.getMuted());
+      });
+    }
+
     updateMuteButton(CS.Audio.getMuted());
     CS.UI.hud({ score: 0, best: best, level: 1 });
-    CS.UI.show('menu');
+    CS.UI.show('lang'); // language selection on every entry (feature T7)
     state = 'menu';
     CS.Audio.music('menu'); // silently ignored until the first gesture
 

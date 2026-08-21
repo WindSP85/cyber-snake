@@ -14,27 +14,27 @@
     <div id="hud" class="hud">
       <div class="hud-stats">
         <div class="hud-stat">
-          <span class="hud-label">Счёт</span>
+          <span class="hud-label" data-i18n="hudScore">Счёт</span>
           <span id="score" class="hud-value">0</span>
         </div>
         <div class="hud-stat">
-          <span class="hud-label">Рекорд</span>
+          <span class="hud-label" data-i18n="hudBest">Рекорд</span>
           <span id="best" class="hud-value">0</span>
         </div>
         <div class="hud-stat">
-          <span class="hud-label">Уровень</span>
+          <span class="hud-label" data-i18n="hudLevel">Уровень</span>
           <span id="level" class="hud-value">1</span>
         </div>
       </div>
       <div class="hud-buttons">
-        <button id="btn-pause" class="btn btn-hud" type="button">Пауза</button>
+        <button id="btn-pause" class="btn btn-hud" type="button" data-i18n="pauseBtn">Пауза</button>
         <button id="mute-btn" class="btn btn-hud" type="button">Звук: вкл</button>
       </div>
     </div>
 
     <!-- Boss bar (SPEC §8) -->
     <div id="bossbar" class="bossbar hidden">
-      <div id="bossname" class="bossname">СТРАЖ СЕТИ</div>
+      <div id="bossname" class="bossname" data-i18n="boss1">СТРАЖ СЕТИ</div>
       <div class="bosstrack"><div id="bossfill" class="bossfill"></div></div>
     </div>
 
@@ -48,86 +48,98 @@
     <div id="screen-menu" class="screen">
       <div class="panel">
         <h1 class="title glitch" data-text="NEON://SNAKE">NEON://SNAKE</h1>
-        <p class="subtitle">киберпротокол v2.077</p>
-        <p class="menu-best">Рекорд: <span id="menu-best">0</span></p>
+        <p class="subtitle" data-i18n="subtitle">киберпротокол v2.077</p>
+        <p class="menu-best"><span data-i18n="bestLabel">Рекорд:</span> <span id="menu-best">0</span></p>
         <div class="menu-buttons">
-          <button id="btn-start" class="btn btn-primary" type="button">Играть</button>
-          <button id="btn-controls" class="btn" type="button">Управление</button>
+          <button id="btn-start" class="btn btn-primary" type="button" data-i18n="play">Играть</button>
+          <button id="btn-controls" class="btn" type="button" data-i18n="controls">Управление</button>
+          <button id="btn-lang" class="btn" type="button" title="Language">🌐</button>
         </div>
-        <p class="hint">Enter — старт · M — звук</p>
+        <p class="hint" data-i18n="hintMenu">Enter — старт · M — звук</p>
       </div>
     </div>
 
     <!-- Screen: controls (table from SPEC §2) -->
     <div id="screen-controls" class="screen hidden">
       <div class="panel">
-        <h2 class="screen-title">Управление</h2>
+        <h2 class="screen-title" data-i18n="controlsTitle">УПРАВЛЕНИЕ</h2>
         <table class="controls-table">
           <thead>
             <tr>
-              <th>Действие</th>
-              <th>Клавиши</th>
-              <th>Тач</th>
+              <th data-i18n="ctlColAction">Действие</th>
+              <th data-i18n="ctlColKeys">Клавиши</th>
+              <th data-i18n="ctlColTouch">Тач</th>
             </tr>
           </thead>
           <tbody>
             <tr>
-              <td>Направление</td>
-              <td>Стрелки и WASD (одновременно)</td>
-              <td>Свайпы в 4 стороны (порог 24px)</td>
+              <td data-i18n="ctlDirection">Направление</td>
+              <td data-i18n="ctlDirKeys">Стрелки и WASD</td>
+              <td data-i18n="ctlDirTouch">Свайпы в 4 стороны</td>
             </tr>
             <tr>
-              <td>Пауза</td>
-              <td>Space или Esc</td>
-              <td>Кнопка паузы в HUD</td>
+              <td data-i18n="ctlPause">Пауза</td>
+              <td data-i18n="ctlPauseKeys">Space или Esc</td>
+              <td data-i18n="ctlPauseTouch">Кнопка паузы в HUD</td>
             </tr>
             <tr>
-              <td>Старт / рестарт</td>
-              <td>Enter</td>
-              <td>Кнопки «Играть» / «Заново»</td>
+              <td data-i18n="ctlStart">Старт / рестарт</td>
+              <td data-i18n="ctlStartKeys">Enter или клик по полю</td>
+              <td data-i18n="ctlStartTouch">Кнопки «Играть» / «Заново»</td>
             </tr>
             <tr>
-              <td>Звук вкл/выкл</td>
-              <td>M</td>
-              <td>Кнопка звука в HUD</td>
+              <td data-i18n="ctlSound">Звук вкл/выкл</td>
+              <td data-i18n="ctlSoundKeys">M</td>
+              <td data-i18n="ctlSoundTouch">Кнопка звука в HUD</td>
             </tr>
           </tbody>
         </table>
-        <button id="btn-controls-back" class="btn" type="button">В меню</button>
+        <button id="btn-controls-back" class="btn" type="button" data-i18n="back">Назад</button>
       </div>
     </div>
 
     <!-- Screen: pause -->
     <div id="screen-pause" class="screen hidden">
       <div class="panel">
-        <h2 class="screen-title">Пауза</h2>
+        <h2 class="screen-title" data-i18n="pauseTitle">ПАУЗА</h2>
         <div class="menu-buttons">
-          <button id="btn-resume" class="btn btn-primary" type="button">Продолжить</button>
-          <button id="btn-menu" class="btn" type="button">В меню</button>
+          <button id="btn-resume" class="btn btn-primary" type="button" data-i18n="resume">Продолжить</button>
+          <button id="btn-menu" class="btn" type="button" data-i18n="toMenu">В меню</button>
         </div>
-        <p class="hint">Space — продолжить</p>
+        <p class="hint" data-i18n="hintPause">Space — продолжить</p>
       </div>
     </div>
 
     <!-- Screen: game over -->
     <div id="screen-gameover" class="screen hidden">
       <div class="panel panel-danger">
-        <h2 class="screen-title danger">Игра окончена</h2>
+        <h2 class="screen-title danger" data-i18n="gameOverTitle">ИГРА ОКОНЧЕНА</h2>
         <div class="final-stats">
           <div class="final-stat">
-            <span class="hud-label">Счёт</span>
+            <span class="hud-label" data-i18n="hudScore">Счёт</span>
             <span id="final-score" class="final-value">0</span>
           </div>
           <div class="final-stat">
-            <span class="hud-label">Рекорд</span>
+            <span class="hud-label" data-i18n="hudBest">Рекорд</span>
             <span id="final-best" class="final-value final-best">0</span>
           </div>
         </div>
         <div class="menu-buttons">
-          <button id="btn-restart" class="btn btn-primary" type="button">Заново</button>
-          <button id="btn-menu2" class="btn" type="button">В меню</button>
+          <button id="btn-restart" class="btn btn-primary" type="button" data-i18n="restart">Заново</button>
+          <button id="btn-menu2" class="btn" type="button" data-i18n="toMenu">В меню</button>
         </div>
-        <p class="hint">Enter — заново</p>
+        <p class="hint" data-i18n="hintRestart">Enter — заново</p>
+      </div>
+    </div>
+
+    <!-- Screen: language selection (feature T7) -->
+    <div id="screen-lang" class="screen hidden">
+      <div class="panel">
+        <h2 class="screen-title" data-i18n="langTitle">ВЫБЕРИТЕ ЯЗЫК</h2>
+        <div class="lang-buttons">
+          <button id="btn-lang-ru" class="btn btn-lang-tile" type="button">🇷🇺 РУССКИЙ</button>
+          <button id="btn-lang-en" class="btn btn-lang-tile" type="button">🇬🇧 ENGLISH</button>
+        </div>
       </div>
     </div>
 
@@ -137,7 +149,8 @@
     <div class="vignette" aria-hidden="true"></div>
   </div>
 
-  <!-- Scripts: order is fixed by SPEC §7 -->
+  <!-- Scripts: i18n first, then the SPEC §7 order -->
+  <script src="js/i18n.js"></script>
   <script src="js/audio.js"></script>
   <script src="js/bosses.js"></script>
   <script src="js/fx.js"></script>

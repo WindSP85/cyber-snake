@@ -23,14 +23,23 @@
   const CHARGE_RESPAWN  = 2.2;
   const MIN_PAUSE       = 1.6;
 
-  const NAMES = ['СТРАЖ СЕТИ', 'ВИРУС-КОРОЛЕВА', 'АЛГОРИТМ ОМЕГА'];
-
   /* ---------- small helpers ---------- */
   function key(x, y) { return x + ',' + y; }
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
   function lerp(a, b, t) { return a + (b - a) * t; }
   function randInt(n) { return Math.floor(Math.random() * n); }
   function manhattan(ax, ay, bx, by) { return Math.abs(ax - bx) + Math.abs(ay - by); }
+
+  /* i18n translate — boss names live in the dictionary (js/i18n.js) */
+  function tr(key, arg) {
+    return CS.I18N && CS.I18N.t ? CS.I18N.t(key, arg) : key;
+  }
+
+  /* base names are the boss1..boss3 keys, stronger repeats become mk.N */
+  function bossName(bossIndex) {
+    if (bossIndex <= 3) return tr('boss' + bossIndex);
+    return tr('boss3') + ' mk.' + (bossIndex - 3);
+  }
 
   function roundRectPath(g, x, y, w, h, r) {
     g.beginPath();
@@ -70,9 +79,7 @@
 
       this.maxHp = 3 + this.bossIndex;
       this.hp = this.maxHp;
-      this.name = this.bossIndex <= NAMES.length
-        ? NAMES[this.bossIndex - 1]
-        : 'АЛГОРИТМ ОМЕГА mk.' + (this.bossIndex - NAMES.length);
+      this.name = bossName(this.bossIndex); // frozen at construction time
 
       this.active = true;
       this.phase = 'intro';   // 'intro' | 'idle' | 'telegraph' | 'attack' | 'dead'
@@ -109,7 +116,7 @@
       this.head = null;
       this.snakeKeys = new Set();
 
-      this.emit('onWarn', '⚠ БОСС: ' + this.name);
+      this.emit('onWarn', tr('bossWarn') + this.name);
       this.emit('onSfx', 'warn');
     }
 
