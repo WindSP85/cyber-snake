@@ -1140,18 +1140,19 @@ body::before {
 }
 
 @media (orientation: portrait) and (max-width: 900px) {
-  /* stack the column: arena on top, D-pad right under it */
+  /* центрируем стек: арена сверху, D-pad ниже, воздух делится поровну */
   body {
     flex-direction: column;
     align-items: center;
-    justify-content: flex-start;
-    padding-top: 2vh;
+    justify-content: center;
+    gap: 3vh;
+    padding-top: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0);
   }
 
-  /* full-width canvas, but never taller than the room left below
-     (hud ~52 + layout gap 6 + D-pad ~172 + margins ≈ 300px) */
+  /* полная ширина, но не выше остатка высоты (hud ~52 + D-pad ~230 + воздух) */
   .layout {
-    width: min(96vw, calc((100vh - 300px) * 1.5));
+    width: min(96vw, calc((100vh - 360px) * 1.5));
   }
 
   .dpad {
@@ -1160,8 +1161,59 @@ body::before {
     grid-template-areas:
       ". up ."
       "left down right";
+    gap: 12px;
+    width: min(440px, 94vw);
+    margin: 0;
+  }
+
+  .dpad-btn {
+    min-height: 74px;
+    font-size: 26px;
+  }
+
+  /* пальце-ориентированные кнопки HUD */
+  .hud .btn-icon {
+    width: 42px;
+    height: 36px;
+    font-size: 17px;
+  }
+
+  /* экраны меню/паузы/гейм-овера — на весь телефон:
+     полоса канваса слишком низка для панелей, они не должны толпиться */
+  .screen {
+    position: fixed;
+    z-index: 50;
+    padding: 16px;
+  }
+
+  .panel {
+    padding: 20px 16px;
+    max-width: min(92vw, 420px);
+    max-height: 86vh;
+    overflow-y: auto;
+  }
+
+  .menu-buttons {
+    flex-direction: column;
     gap: 10px;
-    width: min(420px, 92vw);
-    margin: 14px auto 20px;
+  }
+
+  .menu-buttons .btn {
+    width: 100%;
+    padding: 13px 18px;
+    font-size: 14px;
+  }
+
+  .lang-buttons {
+    gap: 10px;
+  }
+
+  .controls-table {
+    font-size: 11px;
+  }
+
+  #player-name {
+    width: 100%;
+    margin: 8px 0;
   }
 }
