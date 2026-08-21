@@ -1,7 +1,7 @@
 # NEON://SNAKE
 
-> 🇷🇺 Киберпанк-змейка с боссами и синт-саундтреком — прямо в браузере, без установки.
-> 🇬🇧 A cyberpunk snake game with bosses and a synthwave soundtrack — right in your browser.
+> 🇷🇺 Киберпанк-змейка с боссами, тайнами и синт-саундтреком — прямо в браузере, без установки.
+> 🇬🇧 A cyberpunk snake game with bosses, mystery boxes and a synthwave soundtrack — right in your browser.
 
 **[▶ Играть онлайн / Play online](https://windsp85.github.io/cyber-snake/)** · или скачайте репозиторий и откройте `index.html` двойным кликом / or clone and double-click `index.html`.
 
@@ -9,89 +9,60 @@
 
 ## 🇷🇺 Описание (Русский)
 
-Аркадная змейка в эстетике киберпанка: неоновая арена, глитч-эффекты, полностью синтезированный дарк-синтвейв и боссы с уникальными атаками. Без сборки, без CDN, без зависимостей — игра работает офлайн, даже по двойному клику на `index.html`.
+Аркадная змейка в эстетике киберпанка: неоновая арена, глитч-эффекты, полностью синтезированный дарк-синтвейв и **восемь боссов** с уникальными механиками. Игра адаптируется под любое устройство: определяет разрешение экрана и подстраивает размер арены, в вертикальном режиме телефона появляются большие кнопки управления внизу экрана.
 
 ### Возможности
 
-- 🎮 **Удобное управление** — стрелки и WASD (на любой раскладке клавиатуры), свайпы на телефоне, буфер ввода на 3 нажатия: быстрые повороты «уголком» не теряются, разворот на 180° заблокирован.
-- 🐍 **Плавное движение** — интерполяция между клетками, свечение и градиент змейки от циана к пурпуру.
-- 👾 **Боссы каждые 3 уровня** — прицельный лазер, файрволы, таранные рывки через арену; каждый следующий — сильнее.
-- 🎵 **Живой звук** — музыка и 12 эффектов синтезируются в реальном времени (Web Audio API): спокойное меню 84 BPM, игра 100 BPM, злой боевой режим 128 BPM с дисторшн-басом.
-- 📈 **Прогрессия** — скорость растёт с уровнем, палитра арены меняется (cyan → magenta → yellow → green → orange), бонусы-«фрагменты кода» на время.
-- 🏆 **Рекорд** сохраняется между сессиями (localStorage).
-- ✨ **Эффекты** — частицы, тряска экрана, глитчи, CRT-сканлайны и виньетка.
+- 🌍 **Выбор языка** при входе: русский / English — весь интерфейс, подсказки и имена боссов.
+- 📱 **Адаптивная арена**: плотность игры постоянна (~600 клеток), а пропорции подстраиваются под экран — от 30×20 на десктопе до вертикального поля на телефоне. Раскладка мобильная: счёт вверху, поле в середине, кнопки прижаты к низу.
+- 🎮 **Удобное управление**: стрелки и WASD (любая раскладка), свайпы, экранные кнопки в портрете; буфер ввода — быстрые повороты «уголком» не теряются.
+- 🍎 **Пикапы**: ❤ жизнь (респавн вместо смерти), ⚡ скачок (×1.6 скорость, ×2 очки), 🧲 магнит (сам собирает еду), ❄ замедление, золотой пакет (+150), ☠ вирус (**−50 очков** — счёт умеет падать).
+- ❓ **Контейнеры-тайны**: что внутри — неизвестно: джекпот +500, ×2 очки, турбо, жизнь, **реверс управления**, **распад змейки** (лови сбежавшие ядра!), или мгновенная смерть.
+- 🏦 **Хранилище хвоста**: периодический портал конвертирует отросший хвост в очки (+15 × уровень за сегмент) — вечный рост больше не приговор.
+- 👾 **8 боссов** каждые 3 уровня (далее — усиленные mk-версии): лазеры, файрволы, рывки, рассекающий луч с разрезанием змейки, снаряды и мины, босс-пожиратель хвоста, заморозка, дроны-антивирусы.
+- 🏆 **Таблица лидеров**: локальный топ-10 с именами и датами; при рекорде — предложение сохранить результат (интерфейс готов к глобальному серверу).
+- 🎵 **Живой звук**: музыка и 20+ эффектов синтезируются в реальном времени (Web Audio API): меню 84 BPM, игра 100 BPM, боевой режим 128 BPM с дисторшн-басом.
+- ✨ **Эффекты**: частицы, тряска, глитчи, CRT-сканлайны, всплывающий «−1» урона над боссом.
 
 ### Управление
 
 | Действие | Клавиши | Тач |
 |---|---|---|
-| Направление | Стрелки **и** WASD | Свайпы в 4 стороны |
-| Пауза | Space или Esc | Кнопка «Пауза» в HUD |
+| Направление | Стрелки **и** WASD | Свайпы или экранные кнопки |
+| Пауза | Space или Esc | Кнопка паузы |
 | Старт / рестарт | Enter | Кнопки «Играть» / «Заново» |
-| Звук вкл/выкл | M | Кнопка звука в HUD |
-
-### Боссы
-
-| Босс | Чем опасен |
-|---|---|
-| **СТРАЖ СЕТИ** | прицельный лазер по ряду/колонке, файрволы |
-| **ВИРУС-КОРОЛЕВА** | + таранные рывки через всю арену |
-| **АЛГОРИТМ ОМЕГА** | весь арсенал, быстрее и злее; далее — версии mk.N |
-
-Каждая атака телеграфируется мигающим красным предупреждением. Босс получает урон от зелёных «зарядов данных» на поле. За победу — взрыв, фанфара и +250 × номер босса.
+| Звук | M | Кнопка звука |
 
 ### Запуск
 
-Откройте `index.html` в любом современном браузере (Chrome, Edge, Firefox). Интернет, сервер и установка не нужны.
+Откройте `index.html` в любом современном браузере — интернет и установка не нужны. Для Telegram: `@windspsnake_bot` → мини-приложение «snake».
 
 ### Стек
 
-Vanilla JS (классические скрипты, без сборки), **Canvas 2D** (рендер с интерполяцией и devicePixelRatio), **Web Audio API** (16-шаговый секвенсор, ля-минор). Ноль внешних зависимостей.
-
-### Структура
-
-```
-index.html      — разметка: канвас, HUD, экраны
-css/style.css   — неоновый стиль, CRT-оверлеи, глитч-анимации
-js/audio.js     — CS.Audio: синтезированная музыка и SFX
-js/bosses.js    — CS.BossFight: боссы, лазер/файрвол/рывок
-js/fx.js        — CS.FX: частицы, тряска, глитч, вспышки
-js/ui.js        — CS.UI: экраны, HUD, тосты
-js/game.js      — CS.Game: ядро — змейка, уровни, ввод, loop
-```
+Vanilla JS (классические скрипты без сборки), **Canvas 2D** (интерполяция, devicePixelRatio, адаптивная сетка), **Web Audio API** (16-шаговый секвенсор, ля-минор). Ноль внешних зависимостей, офлайн-first.
 
 ---
 
 ## 🇬🇧 English
 
-An arcade snake game in cyberpunk aesthetics: neon grid, glitch effects, a fully synthesized dark-synthwave soundtrack and bosses with unique attack patterns. No build step, no CDN, no dependencies — it even runs offline from a double-clicked `index.html`.
+An arcade snake in cyberpunk aesthetics: neon grid, glitch effects, a fully synthesized dark-synthwave soundtrack and **eight bosses** with unique mechanics. The game adapts to any device: it detects the screen resolution and adjusts the arena, showing big on-screen controls at the bottom in phone portrait.
 
 ### Features
 
-- 🎮 **Comfortable controls** — Arrow keys and WASD (works on any keyboard layout), touch swipes, a 3-input buffer so fast corner turns are never lost; 180° reversals blocked.
-- 🐍 **Smooth motion** — sub-cell interpolation, glowing cyan-to-magenta gradient snake.
-- 👔 **Bosses every 3rd level** — targeted lasers, firewall blocks, dash attacks across the arena; each boss is stronger than the last.
-- 🎵 **Live sound** — music and 12 SFX synthesized in real time (Web Audio API): calm 84 BPM menu, 100 BPM gameplay, a fierce 128 BPM battle theme with a distorted bass.
-- 📈 **Progression** — speed scales with level, arena palette cycles, timed bonus pickups.
-- 🏆 **High score** persisted in localStorage.
-- ✨ **Juice** — particles, screen shake, glitches, CRT scanlines and vignette.
-
-### Controls
-
-| Action | Keys | Touch |
-|---|---|---|
-| Direction | Arrows **and** WASD | 4-way swipes |
-| Pause | Space or Esc | Pause button |
-| Start / restart | Enter | «Играть» / «Заново» buttons |
-| Mute | M | Sound button |
+- 🌍 **Language selection** on entry: Russian / English — the whole UI, hints and boss names.
+- 📱 **Adaptive arena**: constant game density (~600 cells), proportions follow the screen — 30×20 on desktop, a vertical field on phones. Mobile layout: score on top, field in the middle, buttons pinned to the bottom.
+- 🎮 **Comfortable controls**: arrows and WASD (any layout), swipes, on-screen buttons in portrait; input buffer keeps fast corner turns.
+- 🍎 **Pickups**: ❤ extra life (respawn instead of death), ⚡ surge, 🧲 magnet, ❄ time dilation, golden packet (+150), ☠ virus (**−50 points** — the score can drop).
+- ❓ **Mystery containers**: jackpot +500, ×2 score, turbo, life, **reversed controls**, **snake split** (catch the escaped cores!), or instant death.
+- 🏦 **Tail bank**: a periodic portal converts your grown tail into points (+15 × level per segment).
+- 👾 **8 bosses** every 3rd level (then stronger mk-versions): lasers, firewalls, dashes, a cutting beam that slices the snake, projectiles and mines, a tail-devouring boss, freeze waves, antivirus drones.
+- 🏆 **Leaderboard**: local top-10 with names and dates; server-ready interface.
+- 🎵 **Live sound**: music and 20+ SFX synthesized in real time (Web Audio API).
+- ✨ **Juice**: particles, screen shake, glitches, CRT scanlines, floating «−1» damage markers.
 
 ### Run
 
-Open `index.html` in any modern browser (Chrome, Edge, Firefox). No internet, server or installation required.
-
-### Tech
-
-Vanilla JS (classic scripts, no build), **Canvas 2D** (interpolated rendering, devicePixelRatio-aware), **Web Audio API** (16-step sequencer, A minor). Zero external dependencies.
+Open `index.html` in any modern browser — no internet or installation required. Telegram: `@windspsnake_bot` → «snake» mini app.
 
 ---
 
