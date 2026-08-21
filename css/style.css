@@ -1085,3 +1085,83 @@ body::before {
     font-size: 14px;
   }
 }
+
+/* ============================================================
+   Feature T12: portrait D-pad (SPEC §2 touch controls)
+   ============================================================ */
+
+/* hidden by default: desktop and landscape steer with the keyboard */
+.dpad {
+  display: none;
+}
+
+/* neon tile in the .btn idiom: cyan frame, glow, fill on press */
+.dpad-btn {
+  min-height: 64px;
+  font-family: var(--font);
+  font-size: 22px;
+  line-height: 1;
+  color: var(--cyan);
+  background: rgba(0, 240, 255, .04);
+  border: 1px solid rgba(0, 240, 255, .7);
+  cursor: pointer;
+  text-shadow: 0 0 8px rgba(0, 240, 255, .6);
+  box-shadow:
+    0 0 10px rgba(0, 240, 255, .18),
+    inset 0 0 10px rgba(0, 240, 255, .06);
+  transition: background .18s, color .18s, box-shadow .18s, transform .06s;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+.dpad-btn:active {
+  background: rgba(0, 240, 255, .25);
+  box-shadow:
+    0 0 26px rgba(0, 240, 255, .65),
+    inset 0 0 16px rgba(0, 240, 255, .25);
+  transform: translateY(1px);
+}
+
+.dpad-up {
+  grid-area: up;
+}
+
+.dpad-left {
+  grid-area: left;
+}
+
+.dpad-down {
+  grid-area: down;
+}
+
+.dpad-right {
+  grid-area: right;
+}
+
+@media (orientation: portrait) and (max-width: 900px) {
+  /* stack the column: arena on top, D-pad right under it */
+  body {
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding-top: 2vh;
+  }
+
+  /* full-width canvas, but never taller than the room left below
+     (hud ~52 + layout gap 6 + D-pad ~172 + margins ≈ 300px) */
+  .layout {
+    width: min(96vw, calc((100vh - 300px) * 1.5));
+  }
+
+  .dpad {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-areas:
+      ". up ."
+      "left down right";
+    gap: 10px;
+    width: min(420px, 92vw);
+    margin: 14px auto 20px;
+  }
+}

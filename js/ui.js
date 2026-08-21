@@ -230,6 +230,14 @@
     bind('btn-lang-en', function () {
       applyLang('en');
     });
+
+    // feature T12: portrait D-pad — replay tile taps as arrow keydowns;
+    // game.js already listens for document keydown by e.code
+    document.addEventListener('click', function (e) {
+      const b = e.target && e.target.closest ? e.target.closest('.dpad-btn') : null;
+      if (!b) return;
+      document.dispatchEvent(new KeyboardEvent('keydown', { code: b.dataset.dir, bubbles: true }));
+    });
   }
 
   function init() {
