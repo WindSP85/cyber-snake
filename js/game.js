@@ -5,7 +5,8 @@
    (keyboard + touch), the main rAF loop and the best score.
 
    States: 'menu' | 'playing' | 'boss' | 'paused' | 'gameover'
-   plus the internal 'dying' (1 s freeze before the game over).
+   plus the internal 'dying' (1 s freeze before the game over) and
+   'respawning' (feature T8: a spent life reboots the snake).
    ============================================================ */
 (function () {
   'use strict';
@@ -40,6 +41,41 @@
   const DMG_POP_TIME = 0.9;         // "-1" hit marker over the boss, seconds
   const SWIPE_MIN = 24;             // touch swipe threshold, px
 
+  /* feature T8: pickups (SPEC §11) */
+  const PICKUP_MIN = 8;             // spawn interval range, seconds
+  const PICKUP_MAX = 14;
+  const PICKUP_MAX_FIELD = 2;       // pickups on the field at once
+  const PICKUP_LIFE = 9;            // pickup lifetime, seconds
+  const PICKUP_BLINK = 2;           // blink during the last seconds
+  const VIRUS_PENALTY = 50;         // score, floor 0
+  const GOLDEN_SCORE = 150;
+  const SURGE_TIME = 5;             // speed x1.6, score x2
+  const SURGE_SPEED = 1.6;
+  const SURGE_SCORE = 2;
+  const SLOW_TIME = 5;              // tick x0.7
+  const SLOW_FACTOR = 0.7;
+  const MAGNET_TIME = 6;            // auto-collect radius 3
+  const MAGNET_RADIUS = 3;          // manhattan cells from the head
+  const MAX_LIVES = 3;
+  const RESPAWN_TIME = 1.2;         // 'respawning' state length, seconds
+  const RESPAWN_LEN = 3;            // snake length after a respawn
+  const RESPAWN_INVULN = 2;         // invulnerability after a respawn
+  const FX_HUD_INTERVAL = 0.2;      // effects DOM refresh, seconds
+
+  /* weighted pickup types; 'life' is excluded while lives are full */
+  const PICKUP_TYPES = [
+    { type: 'virus', weight: 30 },
+    { type: 'golden', weight: 20 },
+    { type: 'surge', weight: 15 },
+    { type: 'slow', weight: 15 },
+    { type: 'magnet', weight: 10 },
+    { type: 'life', weight: 10 }
+  ];
+
+  const EFFECT_DUR = { surge: SURGE_TIME, slow: SLOW_TIME, magnet: MAGNET_TIME };
+  const EFFECT_ICON = { surge: '⚡', slow: '❄', magnet: '🧲' };
+  const EFFECT_LABEL = { surge: 'pSurge', slow: 'pSlow', magnet: 'pMagnet' };
+
   const PALETTE = ['#00f0ff', '#ff2bd6', '#ffe600', '#00ff9d', '#ff7a00'];
   const BG = '#04050c';
   const GRID_LINE = 'rgba(0,240,255,.07)';
@@ -58,7 +94,7 @@
   let canvas = null;
   let g = null;
 
-  let state = 'menu';               // 'menu'|'playing'|'boss'|'paused'|'gameover'|'dying'
+  let state = 'menu';               // 'menu'|'playing'|'boss'|'paused'|'gameover'|'dying'|'respawning'
   let resumeState = 'playing';      // where a pause returns to
   let snake = [];                   // [{prev:{x,y}, curr:{x,y}}], head first
   let dir = DIR.right;
@@ -79,6 +115,16 @@
   let pendingBoss = 0;              // boss index waiting for the current fight
   let lastBossHp = -1;
   let dmgPops = [];                 // floating "-1" hit markers over the boss core
+
+  /* feature T8: pickups, timed effects, lives, respawn */
+  let pickups = [];                 // [{x,y,type,timer}]
+  let pickupTimer = 0;              // countdown to the next spawn
+  let effects = [];                 // [{type,timer,total}]
+  let lives = 0;
+  let respawnTimer = 0;
+  let invulnTimer = 0;              // post-respawn invulnerability
+  let fxHudTimer = 0;               // effects DOM refresh counter
+  let fxHudSig = '';                // last rendered effect set signature
 
   let running = false;
   let lastTs = 0;
@@ -140,13 +186,57 @@
   /* ---------- score ---------- */
 
   function addScore(n) {
-    score += n;
+    const mult = hasEffect('surge') ? SURGE_SCORE : 1; // feature T8: surge doubles gains
+    score += n * mult;
     if (score > best) {
       best = score;
       saveBest();
       CS.UI.hud({ best: best });
     }
     CS.UI.hud({ score: score });
+  }
+
+  /* feature T8: a virus drops the score, never below zero (SPEC §11) */
+  function penalizeScore(n) {
+    score = Math.max(0, score - n);
+    CS.UI.hud({ score: score });
+  }
+
+  /* ---------- timed effects (feature T8) ---------- */
+
+  function hasEffect(type) {
+    for (let i = 0; i < effects.length; i++) {
+      if (effects[i].type === type) return true;
+    }
+    return false;
+  }
+
+  function addEffect(type) {
+    const dur = EFFECT_DUR[type];
+    if (!dur) return;
+    for (let i = 0; i < effects.length; i++) {
+      if (effects[i].type === type) {
+        effects[i].timer = dur; // refresh an already running effect
+        effects[i].total = dur;
+        if (type === 'surge' || type === 'slow') applySpeed();
+        return;
+      }
+    }
+    effects.push({ type: type, timer: dur, total: dur });
+    if (type === 'surge' || type === 'slow') applySpeed();
+  }
+
+  function updateEffects(dt) {
+    let speedDirty = false;
+    for (let i = effects.length - 1; i >= 0; i--) {
+      effects[i].timer -= dt;
+      if (effects[i].timer <= 0) {
+        if (effects[i].type === 'surge' || effects[i].type === 'slow') speedDirty = true;
+        effects.splice(i, 1);
+      }
+    }
+    // surge and slow stack multiplicatively; recompute on expiry
+    if (speedDirty) applySpeed();
   }
 
   /* ---------- food / bonus ---------- */
@@ -158,6 +248,9 @@
     }
     if (food) occ.add(key(food.x, food.y));
     if (bonus) occ.add(key(bonus.x, bonus.y));
+    for (let i = 0; i < pickups.length; i++) { // feature T8
+      occ.add(key(pickups[i].x, pickups[i].y));
+    }
     if (fight && fight.active) {
       const haz = fight.hazardCells();
       if (haz && haz.forEach) haz.forEach(function (k) { occ.add(k); });
@@ -196,10 +289,92 @@
     if (c) bonus = { x: c.x, y: c.y, timer: BONUS_TIME };
   }
 
+  /* ---------- pickups (feature T8, SPEC §11) ---------- */
+
+  function manhattan(a, b) {
+    return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+  }
+
+  /* weighted random type; 'life' never spawns while the stock is full */
+  function pickPickupType() {
+    const pool = [];
+    let total = 0;
+    for (let i = 0; i < PICKUP_TYPES.length; i++) {
+      const p = PICKUP_TYPES[i];
+      if (p.type === 'life' && lives >= MAX_LIVES) continue;
+      pool.push(p);
+      total += p.weight;
+    }
+    let roll = Math.random() * total;
+    for (let i = 0; i < pool.length; i++) {
+      roll -= pool[i].weight;
+      if (roll <= 0) return pool[i].type;
+    }
+    return pool.length ? pool[pool.length - 1].type : 'golden';
+  }
+
+  function spawnPickup() {
+    if (pickups.length >= PICKUP_MAX_FIELD) return false;
+    const c = randomFreeCell(occupiedKeys());
+    if (!c) return false;
+    pickups.push({ x: c.x, y: c.y, type: pickPickupType(), timer: PICKUP_LIFE });
+    return true;
+  }
+
+  /* lifetimes tick down; the spawn timer holds while the field is full
+     or a boss intro is playing (no pickups during the intro) */
+  function updatePickups(dt) {
+    for (let i = pickups.length - 1; i >= 0; i--) {
+      pickups[i].timer -= dt;
+      if (pickups[i].timer <= 0) pickups.splice(i, 1);
+    }
+    pickupTimer -= dt;
+    if (pickupTimer > 0) return;
+    if (pickups.length >= PICKUP_MAX_FIELD) return;
+    if (fight && fight.active && fight.phase === 'intro') return;
+    if (spawnPickup()) {
+      pickupTimer = PICKUP_MIN + Math.random() * (PICKUP_MAX - PICKUP_MIN);
+    } else {
+      pickupTimer = 1; // the field was too crowded: retry in a second
+    }
+  }
+
+  function applyPickup(p) {
+    const px = p.x * CELL + CELL / 2;
+    const py = p.y * CELL + CELL / 2;
+    if (p.type === 'virus') {
+      penalizeScore(VIRUS_PENALTY);
+      CS.FX.glitch(0.3);
+      CS.FX.burst(px, py, '#ff7a00', 12);
+      CS.UI.toast(tr('pVirus'));
+      CS.Audio.sfx('pickupBad');
+    } else if (p.type === 'golden') {
+      addScore(GOLDEN_SCORE);
+      CS.FX.burst(px, py, '#ffe600', 14);
+      CS.UI.toast(tr('pGolden'));
+      CS.Audio.sfx('pickup');
+    } else if (p.type === 'surge' || p.type === 'slow' || p.type === 'magnet') {
+      addEffect(p.type);
+      CS.FX.burst(px, py, p.type === 'surge' ? '#ffe600' : (p.type === 'slow' ? '#7de3ff' : '#00f0ff'), 12);
+      CS.UI.toast(tr('p' + p.type.charAt(0).toUpperCase() + p.type.slice(1)));
+      CS.Audio.sfx('pickup');
+    } else if (p.type === 'life') {
+      if (lives < MAX_LIVES) lives++;
+      updateLivesHud();
+      CS.FX.burst(px, py, '#ff2d55', 14);
+      CS.UI.toast(tr('pLife'));
+      CS.Audio.sfx('life');
+    }
+  }
+
   /* ---------- levels / speed ---------- */
 
   function applySpeed() {
-    const tps = Math.min(MAX_TPS, BASE_TPS + TPS_STEP * (level - 1));
+    let tps = Math.min(MAX_TPS, BASE_TPS + TPS_STEP * (level - 1));
+    // feature T8: surge and slow stack multiplicatively on top of the
+    // level-based base (which stays frozen during a boss fight)
+    if (hasEffect('surge')) tps *= SURGE_SPEED;
+    if (hasEffect('slow')) tps *= SLOW_FACTOR;
     stepInterval = 1 / tps;
   }
 
@@ -267,7 +442,11 @@
   /* ---------- death sequence ---------- */
 
   function die() {
-    if (state === 'dying' || state === 'gameover') return;
+    if (state === 'dying' || state === 'gameover' || state === 'respawning') return;
+    if (lives > 0) { // feature T8: a spare life reboots the snake
+      startRespawn();
+      return;
+    }
     state = 'dying';
     dieTimer = DIE_TIME;
     stepTimer = 0;
@@ -289,10 +468,59 @@
     CS.FX.flash('#ff2d55', 0.25);
   }
 
+  /* feature T8: spend a life, reboot, come back 3 segments strong */
+  function startRespawn() {
+    lives--;
+    updateLivesHud();
+    state = 'respawning';
+    respawnTimer = RESPAWN_TIME;
+    stepTimer = 0;
+    dirQueue = [];
+    CS.Audio.sfx('respawn');
+    CS.UI.toast(tr('respawnToast'));
+    const n = snake.length;
+    for (let i = 0; i < n; i++) {
+      CS.FX.burst(
+        snake[i].curr.x * CELL + CELL / 2,
+        snake[i].curr.y * CELL + CELL / 2,
+        segColor(i, n),
+        10
+      );
+    }
+    snake = []; // nothing to steer until the reboot lands
+    CS.FX.shake(10);
+    CS.FX.glitch(0.4);
+    CS.FX.flash('#ff2d55', 0.2);
+  }
+
+  function finishRespawn() {
+    const cx = Math.floor(GRID_W / 2);
+    const cy = Math.floor(GRID_H / 2);
+    snake = [];
+    for (let i = 0; i < RESPAWN_LEN; i++) {
+      const x = cx - i;
+      snake.push({ prev: { x: x, y: cy }, curr: { x: x, y: cy } });
+    }
+    dir = DIR.right;
+    dirQueue = [];
+    growth = 0;
+    stepTimer = 0;
+    invulnTimer = RESPAWN_INVULN;
+    // score / level / the live boss fight all survive the reboot
+    state = fight && fight.active ? 'boss' : 'playing';
+    if (state === 'boss') CS.Audio.music('boss');
+    else CS.Audio.music('game');
+  }
+
   function finishGameOver() {
     state = 'gameover';
     fight = null;
     pendingBoss = 0;
+    pickups = [];      // feature T8
+    effects = [];
+    invulnTimer = 0;
+    applySpeed();      // drop surge/slow multipliers from stepInterval
+    renderEffectsHud();
     if (score > best) {
       best = score;
       saveBest();
@@ -301,6 +529,58 @@
     CS.UI.bossBar(0, 0, false);
     CS.UI.banner(null, false);
     CS.UI.show('gameover');
+  }
+
+  /* ---------- shared pickup code (also used by the T8 magnet) ---------- */
+
+  function eatFoodAt(x, y) {
+    addScore(FOOD_SCORE * level);
+    eaten++;
+    growth += 1;
+    CS.Audio.sfx('eat');
+    CS.FX.burst(x * CELL + CELL / 2, y * CELL + CELL / 2, '#ff2bd6', 7);
+    food = null;
+    spawnFood();
+    if (eaten % FOOD_PER_LEVEL === 0) levelUp();
+    if (eaten % BONUS_EVERY === 0 && !bonus) spawnBonus();
+  }
+
+  function eatBonusAt(x, y) {
+    addScore(BONUS_SCORE);
+    growth += BONUS_GROW;
+    CS.FX.burst(x * CELL + CELL / 2, y * CELL + CELL / 2, '#ffe600', 14);
+    bonus = null;
+    CS.Audio.sfx('bonus');
+  }
+
+  function collectChargeAt(x, y) {
+    if (!fight || !fight.active) return;
+    if (!fight.collectCharge(x, y)) return;
+    CS.FX.burst(x * CELL + CELL / 2, y * CELL + CELL / 2, '#00ff9d', 10);
+    CS.FX.shake(4);
+    addScore(CHARGE_SCORE); // the fight may be over now (onDefeated ran)
+    if (fight && fight.active) {
+      dmgPops.push({ x: (fight.x + 1) * CELL, y: (fight.y + 1) * CELL, t: DMG_POP_TIME });
+    }
+  }
+
+  /* feature T8: every tick the magnet vacuums food / bonus / boss
+     charges within MAGNET_RADIUS (manhattan) of the head */
+  function magnetCollect() {
+    if (!hasEffect('magnet') || !snake.length) return;
+    const head = snake[0].curr;
+    if (food && manhattan(food, head) <= MAGNET_RADIUS) eatFoodAt(food.x, food.y);
+    if (bonus && manhattan(bonus, head) <= MAGNET_RADIUS) eatBonusAt(bonus.x, bonus.y);
+    if (fight && fight.active) {
+      const charges = fight.chargeCells();
+      if (charges) {
+        for (let i = 0; i < charges.length; i++) {
+          if (manhattan(charges[i], head) <= MAGNET_RADIUS) {
+            collectChargeAt(charges[i].x, charges[i].y);
+          }
+        }
+      }
+    }
   }
 
   /* ---------- the snake tick ---------- */
@@ -318,29 +598,27 @@
       return;
     }
 
-    // self: the tail cell frees this tick unless the snake is growing
-    const growing = growth > 0;
-    const last = snake.length - 1;
-    for (let i = 0; i < snake.length; i++) {
-      if (!growing && i === last) continue;
-      const c = snake[i].curr;
-      if (c.x === nx && c.y === ny) {
-        die();
-        return;
+    // self: the tail cell frees this tick unless the snake is growing;
+    // skipped while invulnerable after a respawn (feature T8)
+    const invuln = invulnTimer > 0;
+    if (!invuln) {
+      const growing = growth > 0;
+      const last = snake.length - 1;
+      for (let i = 0; i < snake.length; i++) {
+        if (!growing && i === last) continue;
+        const c = snake[i].curr;
+        if (c.x === nx && c.y === ny) {
+          die();
+          return;
+        }
       }
     }
 
     // boss data charge at the target cell
-    if (fight && fight.active && fight.collectCharge(nx, ny)) {
-      CS.FX.burst(nx * CELL + CELL / 2, ny * CELL + CELL / 2, '#00ff9d', 10);
-      CS.FX.shake(4);
-      addScore(CHARGE_SCORE); // the fight may be over now (onDefeated ran)
-      if (fight && fight.active) {
-        dmgPops.push({ x: (fight.x + 1) * CELL, y: (fight.y + 1) * CELL, t: DMG_POP_TIME });
-      }
-    }
+    if (fight && fight.active) collectChargeAt(nx, ny);
 
     // every segment follows the one ahead of it
+    const last = snake.length - 1;
     const oldTailX = snake[last].curr.x;
     const oldTailY = snake[last].curr.y;
     for (let i = snake.length - 1; i > 0; i--) {
@@ -356,7 +634,7 @@
     head.curr.x = nx;
     head.curr.y = ny;
 
-    if (growing) {
+    if (growth > 0) {
       growth--;
       // the new tail segment holds the old tail cell: prev = curr
       snake.push({
@@ -366,26 +644,22 @@
     }
 
     // normal food
-    if (food && food.x === nx && food.y === ny) {
-      addScore(FOOD_SCORE * level);
-      eaten++;
-      growth += 1;
-      CS.Audio.sfx('eat');
-      CS.FX.burst(nx * CELL + CELL / 2, ny * CELL + CELL / 2, '#ff2bd6', 7);
-      food = null;
-      spawnFood();
-      if (eaten % FOOD_PER_LEVEL === 0) levelUp();
-      if (eaten % BONUS_EVERY === 0 && !bonus) spawnBonus();
-    }
+    if (food && food.x === nx && food.y === ny) eatFoodAt(nx, ny);
 
     // bonus fragment
-    if (bonus && bonus.x === nx && bonus.y === ny) {
-      addScore(BONUS_SCORE);
-      growth += BONUS_GROW;
-      CS.FX.burst(nx * CELL + CELL / 2, ny * CELL + CELL / 2, '#ffe600', 14);
-      bonus = null;
-      CS.Audio.sfx('bonus');
+    if (bonus && bonus.x === nx && bonus.y === ny) eatBonusAt(nx, ny);
+
+    // pickups (feature T8)
+    for (let i = pickups.length - 1; i >= 0; i--) {
+      if (pickups[i].x === nx && pickups[i].y === ny) {
+        const p = pickups[i];
+        pickups.splice(i, 1);
+        applyPickup(p);
+      }
     }
+
+    // the magnet sweeps around the fresh head position (feature T8)
+    magnetCollect();
 
     // the field was too crowded for a spawn earlier: retry
     if (!food) spawnFood();
@@ -413,7 +687,15 @@
     pendingBoss = 0;
     bannerTimer = 0;
     stepTimer = 0;
+    pickups = [];      // feature T8
+    effects = [];
+    lives = 0;
+    respawnTimer = 0;
+    invulnTimer = 0;
+    pickupTimer = PICKUP_MIN + Math.random() * (PICKUP_MAX - PICKUP_MIN);
     applySpeed();
+    updateLivesHud();
+    renderEffectsHud();
     state = 'playing';
     CS.UI.hud({ score: 0, best: best, level: 1 });
     CS.UI.bossBar(0, 0, false);
@@ -447,6 +729,11 @@
     fight = null;
     pendingBoss = 0;
     bonus = null;
+    pickups = [];      // feature T8
+    effects = [];
+    invulnTimer = 0;
+    applySpeed();      // drop surge/slow multipliers from stepInterval
+    renderEffectsHud();
     CS.UI.bossBar(0, 0, false);
     CS.UI.banner(null, false);
     CS.UI.hud({ best: best });
@@ -469,6 +756,43 @@
     btn.setAttribute('data-i18n-title', key);
     if (btn.classList && typeof btn.classList.toggle === 'function') {
       btn.classList.toggle('muted', muted);
+    }
+  }
+
+  /* ---------- feature T8: lives + active effects in the HUD ---------- */
+
+  function updateLivesHud() {
+    const el = document.getElementById('lives');
+    if (el) el.textContent = '❤×' + lives;
+  }
+
+  /* Chips are rebuilt only when the active set changes; the timer
+     strips are updated on the coarse FX_HUD_INTERVAL (DOM, not canvas) */
+  function renderEffectsHud() {
+    const box = document.getElementById('effects');
+    if (!box) return;
+    let sig = '';
+    for (let i = 0; i < effects.length; i++) sig += effects[i].type + ',';
+    if (sig !== fxHudSig) {
+      fxHudSig = sig;
+      box.innerHTML = '';
+      for (let i = 0; i < effects.length; i++) {
+        const e = effects[i];
+        const chip = document.createElement('span');
+        chip.className = 'fx-chip fx-' + e.type;
+        chip.title = tr(EFFECT_LABEL[e.type]);
+        const bar = document.createElement('i');
+        bar.className = 'fx-bar';
+        chip.appendChild(document.createTextNode(EFFECT_ICON[e.type]));
+        chip.appendChild(bar);
+        box.appendChild(chip);
+      }
+    }
+    for (let i = 0; i < box.children.length && i < effects.length; i++) {
+      const bar = box.children[i].querySelector('.fx-bar');
+      if (!bar || !bar.style) continue;
+      const k = Math.max(0, Math.min(1, effects[i].timer / effects[i].total));
+      bar.style.width = (k * 100).toFixed(1) + '%';
     }
   }
 
@@ -587,6 +911,13 @@
     animTime += dt;
     CS.FX.update(dt);
 
+    // feature T8: the effects DOM is refreshed on a coarse timer
+    fxHudTimer -= dt;
+    if (fxHudTimer <= 0) {
+      fxHudTimer = FX_HUD_INTERVAL;
+      renderEffectsHud();
+    }
+
     if (bannerTimer > 0) {
       bannerTimer -= dt;
       if (bannerTimer <= 0) {
@@ -600,10 +931,23 @@
       if (dmgPops[i].t <= 0) dmgPops.splice(i, 1);
     }
 
-    if (state === 'playing' || state === 'boss') {
+    if (state === 'playing' || state === 'boss' || state === 'respawning') {
       if (bonus) {
         bonus.timer -= dt;
         if (bonus.timer <= 0) bonus = null;
+      }
+      updatePickups(dt);   // feature T8
+      updateEffects(dt);   // feature T8
+
+      if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
+
+      // feature T8: reboot pause — the world (and a live boss fight)
+      // keeps running, the snake comes back afterwards
+      if (state === 'respawning') {
+        if (fight && fight.active) fight.update(dt, snakeCells());
+        respawnTimer -= dt;
+        if (respawnTimer <= 0) finishRespawn();
+        return;
       }
 
       if (state === 'boss' && fight && fight.active) {
@@ -620,7 +964,7 @@
       while ((state === 'playing' || state === 'boss') && stepTimer >= stepInterval && guard-- > 0) {
         stepTimer -= stepInterval;
         step();
-        if (state === 'dying') {
+        if (state === 'dying' || state === 'respawning') {
           stepTimer = 0;
           break;
         }
@@ -635,6 +979,7 @@
   }
 
   function checkHazards() {
+    if (invulnTimer > 0 || !snake.length) return false; // feature T8: respawn shield
     const haz = fight.hazardCells();
     if (!haz || !haz.size) return false;
     const head = snake[0].curr;
@@ -659,6 +1004,7 @@
     if (state !== 'menu') {
       drawFood();
       drawBonus();
+      drawPickups(); // feature T8
       if (fight && fight.active) fight.draw(g, CELL); // draws its charges itself
       drawSnake();
     }
@@ -757,8 +1103,129 @@
     g.restore();
   }
 
+  /* ---------- pickup shapes (feature T8): forms, not squares ---------- */
+
+  function drawHeartShape(s) {
+    const r = s * 0.27; // lobe radius
+    g.beginPath();
+    g.arc(-s * 0.26, -s * 0.16, r, Math.PI * 0.8, Math.PI * 1.95);
+    g.arc(s * 0.26, -s * 0.16, r, Math.PI * 1.05, Math.PI * 0.2);
+    g.lineTo(0, s * 0.5); // the triangle tip
+    g.closePath();
+    g.fill();
+  }
+
+  function drawBoltShape(s) {
+    g.beginPath();
+    g.moveTo(s * 0.12, -s * 0.5);
+    g.lineTo(-s * 0.28, s * 0.08);
+    g.lineTo(-s * 0.02, s * 0.08);
+    g.lineTo(-s * 0.12, s * 0.5);
+    g.lineTo(s * 0.28, -s * 0.08);
+    g.lineTo(s * 0.02, -s * 0.08);
+    g.closePath();
+    g.fill();
+  }
+
+  function drawMagnetShape(s) {
+    const r = s * 0.3;
+    const y = s * 0.08;
+    g.lineCap = 'butt';
+    g.lineWidth = s * 0.3;
+    g.strokeStyle = '#00f0ff';
+    g.beginPath();
+    g.arc(0, y, r, Math.PI, Math.PI * 2); // horseshoe opening down
+    g.stroke();
+    g.fillStyle = '#eafcff'; // pale pole tips
+    g.fillRect(-r - s * 0.15, y, s * 0.3, s * 0.2);
+    g.fillRect(r - s * 0.15, y, s * 0.3, s * 0.2);
+  }
+
+  function drawSnowflakeShape(s) {
+    g.strokeStyle = '#7de3ff';
+    g.lineWidth = 2;
+    g.lineCap = 'round';
+    for (let k = 0; k < 6; k++) {
+      const a = k * Math.PI / 3;
+      const dx = Math.cos(a);
+      const dy = Math.sin(a);
+      g.beginPath();
+      g.moveTo(0, 0);
+      g.lineTo(dx * s * 0.5, dy * s * 0.5);
+      g.stroke();
+      // a little barb pair on each ray
+      g.beginPath();
+      g.moveTo(dx * s * 0.28 - dy * s * 0.13, dy * s * 0.28 + dx * s * 0.13);
+      g.lineTo(dx * s * 0.4, dy * s * 0.4);
+      g.lineTo(dx * s * 0.28 + dy * s * 0.13, dy * s * 0.28 - dx * s * 0.13);
+      g.stroke();
+    }
+  }
+
+  function drawSkullShape(s) {
+    g.fillStyle = '#ff7a00';
+    g.beginPath(); // cranium
+    g.arc(0, -s * 0.1, s * 0.38, 0, Math.PI * 2);
+    g.fill();
+    g.fillRect(-s * 0.22, s * 0.14, s * 0.44, s * 0.24); // jaw
+    g.fillStyle = BG;
+    g.beginPath(); // eye sockets
+    g.arc(-s * 0.15, -s * 0.14, s * 0.11, 0, Math.PI * 2);
+    g.arc(s * 0.15, -s * 0.14, s * 0.11, 0, Math.PI * 2);
+    g.fill();
+    g.fillRect(-s * 0.045, s * 0.14, s * 0.09, s * 0.24); // tooth gap
+  }
+
+  function drawGoldenShape(s) {
+    g.beginPath(); // diamond
+    g.moveTo(0, -s * 0.5);
+    g.lineTo(s * 0.38, 0);
+    g.lineTo(0, s * 0.5);
+    g.lineTo(-s * 0.38, 0);
+    g.closePath();
+    g.fill();
+    g.fillStyle = '#ffffff'; // inner spark
+    g.beginPath();
+    g.moveTo(0, -s * 0.22);
+    g.lineTo(s * 0.16, 0);
+    g.lineTo(0, s * 0.22);
+    g.lineTo(-s * 0.16, 0);
+    g.closePath();
+    g.fill();
+  }
+
+  function drawPickups() {
+    for (let i = 0; i < pickups.length; i++) {
+      const p = pickups[i];
+      if (p.timer <= PICKUP_BLINK && Math.floor(animTime * 8) % 2 === 0) continue;
+      const cx = p.x * CELL + CELL / 2;
+      const cy = p.y * CELL + CELL / 2;
+      const pulse = 0.5 + 0.5 * Math.sin(animTime * 5 + i * 1.7);
+      const s = CELL * 0.7 * (0.92 + 0.08 * pulse); // light pulsation
+      const color = p.type === 'life' ? '#ff2d55'
+        : p.type === 'surge' ? '#ffe600'
+        : p.type === 'magnet' ? '#00f0ff'
+        : p.type === 'slow' ? '#7de3ff'
+        : p.type === 'virus' ? '#ff7a00'
+        : '#ffe600';
+      g.save();
+      g.translate(cx, cy);
+      g.shadowColor = color;
+      g.shadowBlur = 8 + 10 * pulse; // glow like the food
+      g.fillStyle = color;
+      if (p.type === 'life') drawHeartShape(s);
+      else if (p.type === 'surge') drawBoltShape(s);
+      else if (p.type === 'magnet') drawMagnetShape(s);
+      else if (p.type === 'slow') drawSnowflakeShape(s);
+      else if (p.type === 'virus') drawSkullShape(s);
+      else drawGoldenShape(s);
+      g.restore();
+    }
+  }
+
   function drawSnake() {
     const n = snake.length;
+    if (!n) return; // feature T8: empty during the 'respawning' reboot
     const t = (state === 'playing' || state === 'boss' || state === 'paused')
       ? Math.min(1, stepTimer / stepInterval)
       : 1; // dying / gameover: freeze at the current cells
@@ -775,6 +1242,10 @@
     const pad = isHead ? CELL * 0.06 : CELL * 0.07; // ~0.86..0.88 of a cell
     g.save();
     g.fillStyle = color;
+    if (invulnTimer > 0) {
+      // feature T8: the respawn shield blinks the whole snake
+      g.globalAlpha = Math.max(0.08, 0.35 + 0.65 * Math.sin(animTime * 12));
+    }
     if (isHead) {
       g.shadowColor = color;
       g.shadowBlur = 16;

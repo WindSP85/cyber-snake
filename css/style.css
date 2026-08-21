@@ -741,6 +741,85 @@ body::before {
 }
 
 /* ============================================================
+   Feature T8: lives counter + active effect chips in the HUD
+   ============================================================ */
+
+#lives {
+  color: var(--danger);
+  text-shadow: 0 0 8px rgba(255, 45, 85, .55);
+}
+
+/* effect chips sit in the HUD to the left of the buttons */
+.hud-effects {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-right: 10px;
+  min-height: 30px;
+}
+
+.fx-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  font-size: 13px;
+  line-height: 1;
+  background: rgba(0, 240, 255, .05);
+  border: 1px solid rgba(0, 240, 255, .35);
+  overflow: hidden;
+}
+
+/* the timer strip at the bottom of a chip (width % set inline) */
+.fx-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: var(--cyan);
+  box-shadow: 0 0 6px rgba(0, 240, 255, .8);
+}
+
+.fx-surge {
+  border-color: rgba(255, 230, 0, .55);
+}
+
+.fx-surge .fx-bar {
+  background: var(--yellow);
+  box-shadow: 0 0 6px rgba(255, 230, 0, .8);
+}
+
+.fx-slow {
+  border-color: rgba(125, 227, 255, .55);
+}
+
+.fx-slow .fx-bar {
+  background: #7de3ff;
+  box-shadow: 0 0 6px rgba(125, 227, 255, .8);
+}
+
+.fx-magnet .fx-bar {
+  background: var(--cyan);
+  box-shadow: 0 0 6px rgba(0, 240, 255, .8);
+}
+
+@media (max-width: 640px) {
+  .hud-effects {
+    gap: 4px;
+    margin-right: 6px;
+  }
+
+  .fx-chip {
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
+  }
+}
+
+/* ============================================================
    Feature T7: language screen + menu globe button (i18n)
    ============================================================ */
 

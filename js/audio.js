@@ -628,6 +628,60 @@
       f.frequency.exponentialRampToValueAtTime(2600, t + 0.4);
       const g = mkGain(t, 0.25, 0.45, 0.01);
       o.connect(f); f.connect(g); g.connect(sfxBus); reg(o, [f, g]);
+    },
+
+    /* feature T8: fast major 2-note blip arpeggio */
+    pickup: function (t) {
+      [[76, 0], [83, 0.07]].forEach(function (n) {
+        const tt = t + n[1];
+        const dur = n[1] === 0 ? 0.1 : 0.18;
+        const o = mkOsc('square', NOTE(n[0]), tt, tt + dur + 0.04);
+        const g = mkGain(tt, 0.18, dur);
+        o.connect(g); g.connect(sfxBus); reg(o, [g]);
+      });
+    },
+
+    /* feature T8: low minor growl + descending bubbles */
+    pickupBad: function (t) {
+      const o = mkOsc('sawtooth', 110, t, t + 0.5);
+      o.frequency.setValueAtTime(82, t + 0.2);
+      o.frequency.setValueAtTime(98, t + 0.3);
+      o.frequency.setValueAtTime(70, t + 0.4);
+      const f = mkFilter('lowpass', 900, t, 4);
+      const g = mkGain(t, 0.3, 0.45, 0.015);
+      o.connect(f); f.connect(g); g.connect(sfxBus); reg(o, [f, g]);
+      [[0.1, 160, 90], [0.24, 120, 60], [0.34, 95, 45]].forEach(function (b) {
+        const tt = t + b[0];
+        const ob = mkOsc('sine', b[1], tt, tt + 0.13);
+        ob.frequency.exponentialRampToValueAtTime(b[2], tt + 0.11);
+        const gb = mkGain(tt, 0.22, 0.12);
+        ob.connect(gb); gb.connect(sfxBus); reg(ob, [gb]);
+      });
+    },
+
+    /* feature T8: warm C-E-G chime */
+    life: function (t) {
+      [60, 64, 67].forEach(function (m, i) {
+        const tt = t + i * 0.09;
+        const o = mkOsc('triangle', NOTE(m), tt, tt + 0.72);
+        const g = mkGain(tt, 0.2, 0.66);
+        o.connect(g); g.connect(sfxBus); reg(o, [g]);
+      });
+    },
+
+    /* feature T8: reboot — power-down sweep, then rise + noise wash */
+    respawn: function (t) {
+      const o = mkOsc('sawtooth', 600, t, t + 0.72);
+      o.frequency.exponentialRampToValueAtTime(60, t + 0.3);
+      o.frequency.exponentialRampToValueAtTime(880, t + 0.66);
+      const f = mkFilter('lowpass', 2200, t, 2);
+      const g = mkGain(t, 0.26, 0.68, 0.01);
+      o.connect(f); f.connect(g); g.connect(sfxBus); reg(o, [f, g]);
+      const n = mkNoise(t, t + 0.42);
+      const nf = mkFilter('lowpass', 3000, t);
+      nf.frequency.exponentialRampToValueAtTime(200, t + 0.38);
+      const ng = mkGain(t, 0.22, 0.38);
+      n.connect(nf); nf.connect(ng); ng.connect(sfxBus); reg(n, [nf, ng]);
     }
   };
 

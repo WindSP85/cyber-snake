@@ -59,7 +59,15 @@
       bossWarn: '⚠ БОСС: ',
       boss1: 'СТРАЖ СЕТИ',
       boss2: 'ВИРУС-КОРОЛЕВА',
-      boss3: 'АЛГОРИТМ ОМЕГА'
+      boss3: 'АЛГОРИТМ ОМЕГА',
+      pVirus: 'ЗАРАЖЕНИЕ: −50',
+      pGolden: '+150 ДАННЫХ',
+      pSurge: 'СКАЧОК ЭНЕРГИИ!',
+      pSlow: 'ЗАМЕДЛЕНИЕ ВРЕМЕНИ',
+      pMagnet: 'МАГНИТ АКТИВЕН',
+      pLife: '+1 ЖИЗНЬ',
+      respawnToast: 'ПЕРЕЗАПУСК СИСТЕМЫ...',
+      livesLabel: 'Жизни'
     },
     en: {
       langTitle: 'SELECT LANGUAGE',
@@ -105,7 +113,15 @@
       bossWarn: '⚠ BOSS: ',
       boss1: 'NET WARDEN',
       boss2: 'VIRUS QUEEN',
-      boss3: 'OMEGA ALGORITHM'
+      boss3: 'OMEGA ALGORITHM',
+      pVirus: 'INFECTION: −50',
+      pGolden: '+150 DATA',
+      pSurge: 'POWER SURGE!',
+      pSlow: 'TIME DILATION',
+      pMagnet: 'MAGNET ON',
+      pLife: '+1 LIFE',
+      respawnToast: 'SYSTEM REBOOT...',
+      livesLabel: 'Lives'
     }
   };
 
