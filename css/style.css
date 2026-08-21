@@ -867,3 +867,187 @@ body::before {
     max-width: 280px;
   }
 }
+
+/* ============================================================
+   Feature T10: leaderboard screen + gameover name save
+   ============================================================ */
+
+.board-table {
+  border-collapse: collapse;
+  margin: 0 auto 22px;
+  font-size: 13px;
+  text-align: left;
+}
+
+.board-table th {
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  border-bottom: 1px solid rgba(0, 240, 255, .4);
+}
+
+.board-table td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--grid-line);
+  white-space: nowrap;
+}
+
+.board-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.board-table th:first-child,
+.board-table td:first-child {
+  text-align: center;
+}
+
+.board-table .bd-place {
+  color: rgba(215, 247, 255, .55);
+}
+
+.board-table .bd-name {
+  color: #eafcff;
+  font-weight: 700;
+}
+
+.board-table .bd-score {
+  color: var(--yellow);
+}
+
+.board-table .bd-lvl {
+  color: var(--magenta);
+}
+
+.board-table .bd-date {
+  color: rgba(215, 247, 255, .55);
+}
+
+/* top-3 rows shine a bit brighter */
+.board-table tr.bd-top td {
+  text-shadow: 0 0 8px rgba(0, 240, 255, .3);
+}
+
+.board-table tr.bd-top .bd-place {
+  color: var(--cyan);
+  font-weight: 700;
+}
+
+.board-table .board-empty {
+  padding: 18px 30px;
+  text-align: center;
+  letter-spacing: 3px;
+  color: rgba(215, 247, 255, .45);
+}
+
+.board-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+/* small danger-tinted "Clear" (double-click confirm) */
+.btn-small {
+  padding: 8px 16px;
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
+.btn-danger {
+  color: var(--danger);
+  border-color: rgba(255, 45, 85, .7);
+  background: rgba(255, 45, 85, .06);
+  text-shadow: 0 0 8px rgba(255, 45, 85, .55);
+  box-shadow:
+    0 0 10px rgba(255, 45, 85, .18),
+    inset 0 0 10px rgba(255, 45, 85, .06);
+}
+
+.btn-danger:hover,
+.btn-danger:focus-visible {
+  background: rgba(255, 45, 85, .16);
+  box-shadow:
+    0 0 22px rgba(255, 45, 85, .5),
+    inset 0 0 14px rgba(255, 45, 85, .18);
+  outline: none;
+}
+
+/* armed "Sure?" state of the confirm double-click */
+.btn-danger.sure {
+  background: rgba(255, 45, 85, .25);
+  animation: danger-pulse 1s infinite;
+}
+
+/* gameover: top-10 name save block */
+.score-save {
+  margin: 0 0 22px;
+  padding: 14px 18px;
+  background: rgba(0, 240, 255, .04);
+  border: 1px solid rgba(0, 240, 255, .4);
+  box-shadow:
+    0 0 14px rgba(0, 240, 255, .1),
+    inset 0 0 12px rgba(0, 240, 255, .05);
+}
+
+.save-label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--green);
+  text-shadow: 0 0 8px rgba(0, 255, 157, .5);
+}
+
+.save-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.player-name {
+  width: 190px;
+  padding: 10px 12px;
+  font-family: var(--font);
+  font-size: 15px;
+  letter-spacing: 1px;
+  color: #eafcff;
+  background: rgba(4, 5, 12, .9);
+  border: 1px solid rgba(0, 240, 255, .7);
+  box-shadow:
+    0 0 10px rgba(0, 240, 255, .18),
+    inset 0 0 8px rgba(0, 240, 255, .08);
+  outline: none;
+  transition: border-color .18s, box-shadow .18s;
+}
+
+.player-name:focus {
+  border-color: var(--cyan);
+  box-shadow:
+    0 0 18px rgba(0, 240, 255, .45),
+    inset 0 0 10px rgba(0, 240, 255, .12);
+}
+
+@media (max-width: 640px) {
+  .board-table {
+    font-size: 11px;
+  }
+
+  .board-table th,
+  .board-table td {
+    padding: 5px 8px;
+  }
+
+  .player-name {
+    width: 150px;
+    padding: 9px 10px;
+    font-size: 14px;
+  }
+}

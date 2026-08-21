@@ -73,7 +73,20 @@
       pLife: '+1 ЖИЗНЬ',
       pFreeze: 'ЗАМОРОЗКА',
       respawnToast: 'ПЕРЕЗАПУСК СИСТЕМЫ...',
-      livesLabel: 'Жизни'
+      livesLabel: 'Жизни',
+      /* feature T10: leaderboard (SPEC §13) */
+      board: 'Лидеры',
+      boardTitle: 'ЛИДЕРЫ',
+      boardClear: 'Очистить',
+      boardSure: 'Точно?',
+      boardEmpty: 'ПОКА ПУСТО',
+      savePrompt: 'ВЫ В ТОП-10! ИМЯ:',
+      save: 'Сохранить',
+      colPlace: '#',
+      colName: 'ИМЯ',
+      colScore: 'СЧЁТ',
+      colLvl: 'УР.',
+      colDate: 'ДАТА'
     },
     en: {
       langTitle: 'SELECT LANGUAGE',
@@ -133,7 +146,20 @@
       pLife: '+1 LIFE',
       pFreeze: 'FROZEN',
       respawnToast: 'SYSTEM REBOOT...',
-      livesLabel: 'Lives'
+      livesLabel: 'Lives',
+      /* feature T10: leaderboard (SPEC §13) */
+      board: 'Leaders',
+      boardTitle: 'LEADERS',
+      boardClear: 'Clear',
+      boardSure: 'Sure?',
+      boardEmpty: 'EMPTY YET',
+      savePrompt: 'TOP-10! NAME:',
+      save: 'Save',
+      colPlace: '#',
+      colName: 'NAME',
+      colScore: 'SCORE',
+      colLvl: 'LVL',
+      colDate: 'DATE'
     }
   };
 

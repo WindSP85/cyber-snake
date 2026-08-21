@@ -59,6 +59,7 @@
         <div class="menu-buttons">
           <button id="btn-start" class="btn btn-primary" type="button" data-i18n="play">Играть</button>
           <button id="btn-controls" class="btn" type="button" data-i18n="controls">Управление</button>
+          <button id="btn-board" class="btn" type="button" data-i18n="board">Лидеры</button>
           <button id="btn-lang" class="btn" type="button" title="Language">🌐</button>
         </div>
         <p class="hint" data-i18n="hintMenu">Enter — старт · M — звук</p>
@@ -104,6 +105,29 @@
       </div>
     </div>
 
+    <!-- Screen: leaderboard (feature T10) -->
+    <div id="screen-board" class="screen hidden">
+      <div class="panel">
+        <h2 class="screen-title" data-i18n="boardTitle">ЛИДЕРЫ</h2>
+        <table class="board-table">
+          <thead>
+            <tr>
+              <th data-i18n="colPlace">#</th>
+              <th data-i18n="colName">ИМЯ</th>
+              <th data-i18n="colScore">СЧЁТ</th>
+              <th data-i18n="colLvl">УР.</th>
+              <th data-i18n="colDate">ДАТА</th>
+            </tr>
+          </thead>
+          <tbody id="board-list"></tbody>
+        </table>
+        <div class="board-buttons">
+          <button id="btn-board-back" class="btn" type="button" data-i18n="back">Назад</button>
+          <button id="btn-board-clear" class="btn btn-small btn-danger" type="button" data-i18n="boardClear">Очистить</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Screen: pause -->
     <div id="screen-pause" class="screen hidden">
       <div class="panel">
@@ -128,6 +152,14 @@
           <div class="final-stat">
             <span class="hud-label" data-i18n="hudBest">Рекорд</span>
             <span id="final-best" class="final-value final-best">0</span>
+          </div>
+        </div>
+        <!-- feature T10: top-10 name save (revealed by game.js only) -->
+        <div id="score-save" class="score-save hidden">
+          <label class="save-label" for="player-name" data-i18n="savePrompt">ВЫ В ТОП-10! ИМЯ:</label>
+          <div class="save-row">
+            <input id="player-name" class="player-name" type="text" maxlength="12" autocomplete="off" spellcheck="false">
+            <button id="btn-save" class="btn btn-primary" type="button" data-i18n="save">Сохранить</button>
           </div>
         </div>
         <div class="menu-buttons">
@@ -158,6 +190,7 @@
 
   <!-- Scripts: i18n first, then the SPEC §7 order -->
   <script src="js/i18n.js"></script>
+  <script src="js/leaderboard.js"></script>
   <script src="js/audio.js"></script>
   <script src="js/bosses.js"></script>
   <script src="js/fx.js"></script>

@@ -617,6 +617,62 @@
     CS.UI.bossBar(0, 0, false);
     CS.UI.banner(null, false);
     CS.UI.show('gameover');
+    offerScoreSave(); // feature T10: top-10 name save
+  }
+
+  /* ---------- feature T10: leaderboard save (SPEC §13) ---------- */
+
+  function loadPlayerName() {
+    try {
+      return window.localStorage.getItem('cs_name') || '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function savePlayerName(name) {
+    try {
+      window.localStorage.setItem('cs_name', name);
+    } catch (e) {
+      /* storage unavailable: skip persistence */
+    }
+  }
+
+  function hideScoreSave() {
+    const box = document.getElementById('score-save');
+    if (box) box.classList.add('hidden');
+  }
+
+  /* a qualifying score reveals the name input with the last used name */
+  function offerScoreSave() {
+    const box = document.getElementById('score-save');
+    if (!box) return;
+    const ok = CS.Leaderboard &&
+      typeof CS.Leaderboard.qualifies === 'function' &&
+      CS.Leaderboard.qualifies(score);
+    if (!ok) {
+      box.classList.add('hidden');
+      return;
+    }
+    const input = document.getElementById('player-name');
+    if (input) input.value = loadPlayerName();
+    box.classList.remove('hidden');
+    if (input && typeof input.focus === 'function') input.focus();
+  }
+
+  /* "Save" button / Enter in the name field: submit, then show the board */
+  function submitScore() {
+    const input = document.getElementById('player-name');
+    const name = input ? String(input.value || '').trim() : '';
+    if (name && CS.Leaderboard && typeof CS.Leaderboard.submit === 'function') {
+      if (CS.Leaderboard.submit({ name: name, score: score, level: level })) {
+        savePlayerName(name);
+      }
+    }
+    hideScoreSave();
+    CS.Audio.sfx('levelup');
+    if (CS.UI && typeof CS.UI.renderBoard === 'function') CS.UI.renderBoard();
+    CS.UI.show('board');
   }
 
   /* ---------- shared pickup code (also used by the T8 magnet) ---------- */
@@ -771,6 +827,7 @@
   /* ---------- state transitions ---------- */
 
   function startGame() {
+    hideScoreSave();   // feature T10: a fresh run drops the save block
     snake = [];
     const cx = Math.floor(GRID_W / 2);
     const cy = Math.floor(GRID_H / 2);
@@ -1457,19 +1514,32 @@
       if (t && t.closest && t.closest('button')) CS.Audio.sfx('click');
     });
 
-    // screen buttons (start / resume / restart / menu / mute / lang)
+    // screen buttons (start / resume / restart / menu / mute / lang / save)
     CS.UI.on({
       start: startGame,
       restart: startGame,
       resume: resumeGame,
       menu: goMenu,
       mute: toggleMute,
-      lang: showLangScreen
+      lang: showLangScreen,
+      save: submitScore // feature T10
     });
 
     // #btn-pause is not part of the CS.UI.on contract — wire it directly
     const pauseBtn = document.getElementById('btn-pause');
     if (pauseBtn) pauseBtn.addEventListener('click', togglePauseButton);
+
+    // feature T10: Enter inside the name field saves the score and must
+    // not leak to the global Enter restart
+    const nameInput = document.getElementById('player-name');
+    if (nameInput) {
+      nameInput.addEventListener('keydown', function (e) {
+        if ((e.key || '') !== 'Enter') return;
+        if (e.preventDefault) e.preventDefault();
+        if (e.stopPropagation) e.stopPropagation();
+        submitScore();
+      });
+    }
 
     // a language switch re-renders the sound button caption
     if (CS.I18N && typeof CS.I18N.onChange === 'function') {

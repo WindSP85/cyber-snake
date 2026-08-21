@@ -1,15 +1,16 @@
 /* ============================================================
    NEON://SNAKE — UI layer (SPEC §7, §8)
-   CS.UI.show / hud / bossBar / toast / banner / on
+   CS.UI.show / hud / bossBar / toast / banner / renderBoard / on
    ============================================================ */
 (function () {
   'use strict';
 
   const CS = window.CS = window.CS || {};
 
-  const SCREENS = ['lang', 'menu', 'controls', 'pause', 'gameover'];
+  const SCREENS = ['lang', 'menu', 'controls', 'board', 'pause', 'gameover'];
   const TOAST_MS = 1600;
-  const HANDLER_KEYS = ['start', 'resume', 'restart', 'menu', 'mute', 'lang'];
+  const CLEAR_CONFIRM_MS = 3000; // feature T10: "Sure?" arming window
+  const HANDLER_KEYS = ['start', 'resume', 'restart', 'menu', 'mute', 'lang', 'save'];
 
   const handlers = {
     start: null,
@@ -17,7 +18,8 @@
     restart: null,
     menu: null,
     mute: null,
-    lang: null
+    lang: null,
+    save: null
   };
 
   let toastTimer = 0;
@@ -42,10 +44,78 @@
       if (screen === name) el.classList.remove('hidden');
       else el.classList.add('hidden');
     });
+    if (name === 'board') renderBoard(); // feature T10: fresh rows on every show
   }
 
   function fire(name) {
     if (typeof handlers[name] === 'function') handlers[name]();
+  }
+
+  /* ---------- feature T10: leaderboard (SPEC §13) ---------- */
+
+  function appendCell(tr, text, className) {
+    const td = document.createElement('td');
+    if (className) td.className = className;
+    td.textContent = text;
+    tr.appendChild(td);
+  }
+
+  /* rebuild the #board-list rows from CS.Leaderboard */
+  function renderBoard() {
+    const list = byId('board-list');
+    if (!list) return;
+    list.innerHTML = '';
+    const entries = (CS.Leaderboard && typeof CS.Leaderboard.load === 'function')
+      ? CS.Leaderboard.load()
+      : [];
+    if (!entries.length) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 5;
+      td.className = 'board-empty';
+      td.textContent = t('boardEmpty');
+      tr.appendChild(td);
+      list.appendChild(tr);
+      return;
+    }
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const tr = document.createElement('tr');
+      if (i < 3) tr.className = 'bd-top';
+      appendCell(tr, String(i + 1), 'bd-place');
+      appendCell(tr, e.name, 'bd-name');
+      appendCell(tr, String(e.score), 'bd-score');
+      appendCell(tr, String(e.level), 'bd-lvl');
+      appendCell(tr, e.date, 'bd-date');
+      list.appendChild(tr);
+    }
+  }
+
+  /* the gameover name-save block — game.js decides when it shows */
+  function hideScoreSave() {
+    const el = byId('score-save');
+    if (el) el.classList.add('hidden');
+  }
+
+  /* "Clear" uses a double-click confirm: the first click arms the
+     button to "Sure?" for CLEAR_CONFIRM_MS, the second one wipes */
+  let clearArmed = false;
+  let clearTimer = 0;
+
+  function setClearArmed(on) {
+    clearArmed = on;
+    const btn = byId('btn-board-clear');
+    if (!btn) return;
+    btn.textContent = t(on ? 'boardSure' : 'boardClear');
+    btn.classList.toggle('sure', on);
+  }
+
+  function resetClearConfirm() {
+    if (clearTimer) {
+      window.clearTimeout(clearTimer);
+      clearTimer = 0;
+    }
+    if (clearArmed) setClearArmed(false);
   }
 
   /* i18n translate (i18n.js always loads before this file) */
@@ -116,6 +186,33 @@
     });
     bind('btn-controls-back', function () {
       showScreen('menu');
+    });
+    bind('btn-board', function () {
+      showScreen('board');
+    });
+    bind('btn-board-back', function () {
+      resetClearConfirm();
+      showScreen('menu');
+    });
+    bind('btn-board-clear', function () {
+      if (!clearArmed) {
+        setClearArmed(true);
+        if (clearTimer) window.clearTimeout(clearTimer);
+        clearTimer = window.setTimeout(function () {
+          clearTimer = 0;
+          setClearArmed(false);
+        }, CLEAR_CONFIRM_MS);
+        return;
+      }
+      resetClearConfirm();
+      if (CS.Leaderboard && typeof CS.Leaderboard.clear === 'function') {
+        CS.Leaderboard.clear();
+      }
+      renderBoard();
+    });
+    bind('btn-save', function () {
+      hideScoreSave();
+      fire('save');
     });
     bind('mute-btn', function () {
       fire('mute');
@@ -213,7 +310,12 @@
       el.classList.toggle('hidden', show === false);
     },
 
-    /* Subscribe to button events: {start, resume, restart, menu, mute, lang} */
+    /* feature T10: rebuild the leaderboard rows right now */
+    renderBoard: function () {
+      renderBoard();
+    },
+
+    /* Subscribe to button events: {start, resume, restart, menu, mute, lang, save} */
     on: function (callbacks) {
       if (!callbacks) return;
       HANDLER_KEYS.forEach(function (key) {
