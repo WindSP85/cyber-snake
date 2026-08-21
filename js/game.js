@@ -2012,6 +2012,7 @@
         return {
           state: state, score: score, level: level, lives: lives,
           len: snake.length,
+          head: snake.length ? snake[0].curr.x + ',' + snake[0].curr.y : null,
           effects: effects.map(function (e) { return e.type + ':' + Math.ceil(e.timer); }),
           pickups: pickups.map(function (p) { return p.type; }),
           bank: bank ? bank.x + ',' + bank.y : null,
