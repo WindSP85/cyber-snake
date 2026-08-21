@@ -816,6 +816,40 @@ body::before {
   box-shadow: 0 0 6px rgba(234, 250, 255, .9);
 }
 
+/* ============================================================
+   Feature T11: chips for the mystery effects (double / turbo / reverse)
+   ============================================================ */
+
+/* x2 score — green like the bank money */
+.fx-double {
+  border-color: rgba(0, 255, 157, .55);
+}
+
+.fx-double .fx-bar {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(0, 255, 157, .8);
+}
+
+/* x2 speed — hot orange */
+.fx-turbo {
+  border-color: rgba(255, 122, 0, .6);
+}
+
+.fx-turbo .fx-bar {
+  background: var(--orange);
+  box-shadow: 0 0 6px rgba(255, 122, 0, .85);
+}
+
+/* reversed controls — warning red */
+.fx-reverse {
+  border-color: rgba(255, 45, 85, .65);
+}
+
+.fx-reverse .fx-bar {
+  background: var(--danger);
+  box-shadow: 0 0 6px rgba(255, 45, 85, .85);
+}
+
 @media (max-width: 640px) {
   .hud-effects {
     gap: 4px;

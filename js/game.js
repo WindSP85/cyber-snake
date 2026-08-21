@@ -1,8 +1,9 @@
 /* ============================================================
-   NEON://SNAKE — game orchestrator (SPEC §2, §3, §4, §7)
+   NEON://SNAKE — game orchestrator (SPEC §2, §3, §4, §7, §11–§14)
    CS.Game owns the state machine, the snake core, food/bonus,
-   levels & speed, boss integration, the death sequence, input
-   (keyboard + touch), the main rAF loop and the best score.
+   pickups, mystery containers and the tail bank, levels & speed,
+   boss integration, the death sequence, input (keyboard + touch),
+   the main rAF loop and the best score.
 
    States: 'menu' | 'playing' | 'boss' | 'paused' | 'gameover'
    plus the internal 'dying' (1 s freeze before the game over) and
@@ -70,19 +71,78 @@
   const BITE_PENALTY = 25;          // score per bitten segment
   const FREEZE_FACTOR = 0.45;       // tick speed multiplier while frozen
 
-  /* weighted pickup types; 'life' is excluded while lives are full */
+  /* feature T11: mystery containers + the tail bank (SPEC §14) */
+  const MYSTERY_JACKPOT = 500;      // instant score payout
+  const DOUBLE_TIME = 10;           // score x2 effect, seconds
+  const DOUBLE_SCORE = 2;           // score multiplier while 'double' runs
+  const TURBO_TIME = 6;             // speed x2 effect, seconds
+  const TURBO_SPEED = 2.0;          // multiplies with surge / slow / freeze
+  const REVERSE_TIME = 7;           // inverted controls, seconds
+  const SPLIT_KEEP = 3;             // head segments kept by the split
+  const SPLIT_MIN_LEN = 5;          // the split needs a longer snake
+  const ESCAPED_LIFE = 8;           // escaped core lifetime, seconds
+  const ESCAPED_BLINK = 2;          // blink during the last seconds
+  const ESCAPED_SCORE = 100;        // per core caught by the head
+  const BANK_MIN = 22;              // spawn interval range: 30±8 seconds
+  const BANK_MAX = 38;
+  const BANK_LIFE = 10;             // bank lifetime, seconds
+  const BANK_BLINK = 2;             // blink during the last seconds
+  const BANK_ZONE = { x0: 2, y0: 2, x1: 27, y1: 17 }; // 2 cells off the walls
+  const BANK_KEEP = 4;              // segments kept after the conversion
+  const BANK_SEGMENT_SCORE = 15;    // x level per converted segment
+  const BANK_INTEREST = 50;         // flat payout at length <= 4
+
+  /* weighted pickup types (SPEC §14 weights); 'life' is excluded
+     while lives are full */
   const PICKUP_TYPES = [
-    { type: 'virus', weight: 30 },
-    { type: 'golden', weight: 20 },
-    { type: 'surge', weight: 15 },
-    { type: 'slow', weight: 15 },
-    { type: 'magnet', weight: 10 },
-    { type: 'life', weight: 10 }
+    { type: 'virus', weight: 25 },
+    { type: 'golden', weight: 15 },
+    { type: 'surge', weight: 12 },
+    { type: 'slow', weight: 12 },
+    { type: 'magnet', weight: 8 },
+    { type: 'life', weight: 8 },
+    { type: 'mystery', weight: 20 }
   ];
 
-  const EFFECT_DUR = { surge: SURGE_TIME, slow: SLOW_TIME, magnet: MAGNET_TIME, freeze: 3 };
-  const EFFECT_ICON = { surge: '⚡', slow: '❄', magnet: '🧲', freeze: '🧊' };
-  const EFFECT_LABEL = { surge: 'pSurge', slow: 'pSlow', magnet: 'pMagnet', freeze: 'pFreeze' };
+  /* feature T11: weighted mystery outcomes; 'life' is rerolled into
+     'jackpot' while the life stock is full */
+  const MYSTERY_EFFECTS = [
+    { type: 'jackpot', weight: 15 },
+    { type: 'double', weight: 15 },
+    { type: 'turbo', weight: 12 },
+    { type: 'life', weight: 8 },
+    { type: 'reverse', weight: 15 },
+    { type: 'split', weight: 15 },
+    { type: 'death', weight: 10 }
+  ];
+
+  const EFFECT_DUR = {
+    surge: SURGE_TIME,
+    slow: SLOW_TIME,
+    magnet: MAGNET_TIME,
+    freeze: 3,
+    double: DOUBLE_TIME,   // feature T11
+    turbo: TURBO_TIME,     // feature T11
+    reverse: REVERSE_TIME  // feature T11
+  };
+  const EFFECT_ICON = {
+    surge: '⚡',
+    slow: '❄',
+    magnet: '🧲',
+    freeze: '🧊',
+    double: '×2',          // feature T11
+    turbo: '⚡⚡',          // feature T11
+    reverse: '⇄'           // feature T11
+  };
+  const EFFECT_LABEL = {
+    surge: 'pSurge',
+    slow: 'pSlow',
+    magnet: 'pMagnet',
+    freeze: 'pFreeze',
+    double: 'mDouble',     // feature T11
+    turbo: 'mTurbo',       // feature T11
+    reverse: 'mReverse'    // feature T11
+  };
 
   const PALETTE = ['#00f0ff', '#ff2bd6', '#ffe600', '#00ff9d', '#ff7a00'];
   const BG = '#04050c';
@@ -96,6 +156,7 @@
     left: { x: -1, y: 0 },
     right: { x: 1, y: 0 }
   };
+  const DIRS4 = [DIR.up, DIR.down, DIR.left, DIR.right]; // feature T11: core roaming
 
   /* ---------- state ---------- */
 
@@ -137,6 +198,11 @@
   /* feature T9: segments cut off by the decompiler beam */
   let debris = [];                  // [{x,y,t}] — pulsing cyan, 5 s to live
 
+  /* feature T11: mystery containers + the tail bank (SPEC §14) */
+  let escaped = [];                 // [{x,y,t}] — cores shed by the split
+  let bank = null;                  // {x,y,t} — tail bank portal or null
+  let bankTimer = 0;                // countdown to the next bank spawn
+
   let running = false;
   let lastTs = 0;
   let touchStart = null;
@@ -175,6 +241,14 @@
     return 'hsl(' + Math.round(h) + ',100%,' + Math.round(l) + '%)';
   }
 
+  /* feature T11: linear blend of two rgb triples, k = 0..1 */
+  function mixRgb(a, b, k) {
+    const r = Math.round(a[0] + (b[0] - a[0]) * k);
+    const g2 = Math.round(a[1] + (b[1] - a[1]) * k);
+    const b2 = Math.round(a[2] + (b[2] - a[2]) * k);
+    return 'rgb(' + r + ',' + g2 + ',' + b2 + ')';
+  }
+
   function roundRect(g2, x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
     g2.beginPath();
@@ -196,15 +270,26 @@
 
   /* ---------- score ---------- */
 
+  /* every score multiplier in one place: surge x2 (T8) and the
+     mystery 'double' x2 (T11) stack multiplicatively */
+  function scoreMult() {
+    let m = 1;
+    if (hasEffect('surge')) m *= SURGE_SCORE;
+    if (hasEffect('double')) m *= DOUBLE_SCORE;
+    return m;
+  }
+
+  /* returns the amount actually awarded (multipliers included) */
   function addScore(n) {
-    const mult = hasEffect('surge') ? SURGE_SCORE : 1; // feature T8: surge doubles gains
-    score += n * mult;
+    const gained = n * scoreMult();
+    score += gained;
     if (score > best) {
       best = score;
       saveBest();
       CS.UI.hud({ best: best });
     }
     CS.UI.hud({ score: score });
+    return gained;
   }
 
   /* feature T8: a virus drops the score, never below zero (SPEC §11) */
@@ -222,6 +307,12 @@
     return false;
   }
 
+  /* effects that change the tick speed must recompute stepInterval */
+  function isSpeedEffect(type) {
+    return type === 'surge' || type === 'slow' || type === 'freeze' ||
+      type === 'turbo'; // feature T11
+  }
+
   /* dur overrides the table default (feature T9: onFreeze carries one) */
   function addEffect(type, dur) {
     let d = EFFECT_DUR[type];
@@ -231,12 +322,12 @@
       if (effects[i].type === type) {
         effects[i].timer = d; // refresh an already running effect
         effects[i].total = d;
-        if (type === 'surge' || type === 'slow' || type === 'freeze') applySpeed();
+        if (isSpeedEffect(type)) applySpeed();
         return;
       }
     }
     effects.push({ type: type, timer: d, total: d });
-    if (type === 'surge' || type === 'slow' || type === 'freeze') applySpeed();
+    if (isSpeedEffect(type)) applySpeed();
   }
 
   function updateEffects(dt) {
@@ -244,12 +335,11 @@
     for (let i = effects.length - 1; i >= 0; i--) {
       effects[i].timer -= dt;
       if (effects[i].timer <= 0) {
-        if (effects[i].type === 'surge' || effects[i].type === 'slow' ||
-            effects[i].type === 'freeze') speedDirty = true;
+        if (isSpeedEffect(effects[i].type)) speedDirty = true;
         effects.splice(i, 1);
       }
     }
-    // surge / slow / freeze stack multiplicatively; recompute on expiry
+    // surge / slow / freeze / turbo stack multiplicatively; recompute
     if (speedDirty) applySpeed();
   }
 
@@ -268,6 +358,10 @@
     for (let i = 0; i < debris.length; i++) { // feature T9
       occ.add(key(debris[i].x, debris[i].y));
     }
+    for (let i = 0; i < escaped.length; i++) { // feature T11
+      occ.add(key(escaped[i].x, escaped[i].y));
+    }
+    if (bank) occ.add(key(bank.x, bank.y)); // feature T11
     if (fight && fight.active) {
       const haz = fight.hazardCells();
       if (haz && haz.forEach) haz.forEach(function (k) { occ.add(k); });
@@ -381,6 +475,8 @@
       CS.FX.burst(px, py, '#ff2d55', 14);
       CS.UI.toast(tr('pLife'));
       CS.Audio.sfx('life');
+    } else if (p.type === 'mystery') { // feature T11
+      applyMystery(px, py);
     }
   }
 
@@ -394,6 +490,8 @@
     if (hasEffect('slow')) tps *= SLOW_FACTOR;
     // feature T9: the cryogen freeze multiplies on top of everything
     if (hasEffect('freeze')) tps *= FREEZE_FACTOR;
+    // feature T11: the mystery turbo multiplies on top of everything
+    if (hasEffect('turbo')) tps *= TURBO_SPEED;
     stepInterval = 1 / tps;
   }
 
@@ -606,6 +704,8 @@
     pickups = [];      // feature T8
     effects = [];
     debris = [];       // feature T9
+    escaped = [];      // feature T11
+    bank = null;       // feature T11
     invulnTimer = 0;
     applySpeed();      // drop surge/slow multipliers from stepInterval
     renderEffectsHud();
@@ -727,6 +827,216 @@
     }
   }
 
+  /* ---------- feature T11: mystery containers (SPEC §14) ---------- */
+
+  /* weighted roll over the mystery table; a full life stock rerolls
+     'life' into the jackpot */
+  function rollMystery() {
+    let total = 0;
+    for (let i = 0; i < MYSTERY_EFFECTS.length; i++) total += MYSTERY_EFFECTS[i].weight;
+    let roll = Math.random() * total;
+    let type = MYSTERY_EFFECTS[MYSTERY_EFFECTS.length - 1].type;
+    for (let i = 0; i < MYSTERY_EFFECTS.length; i++) {
+      roll -= MYSTERY_EFFECTS[i].weight;
+      if (roll <= 0) {
+        type = MYSTERY_EFFECTS[i].type;
+        break;
+      }
+    }
+    if (type === 'life' && lives >= MAX_LIVES) return 'jackpot';
+    return type;
+  }
+
+  function applyMystery(px, py) {
+    CS.Audio.sfx('mystery');
+    CS.FX.flash('#ffffff', 0.15);
+    CS.FX.burst(px, py, '#ff2bd6', 14);
+    const kind = rollMystery();
+    if (kind === 'jackpot') {
+      addScore(MYSTERY_JACKPOT);
+      CS.UI.toast(tr('mJackpot'));
+    } else if (kind === 'double') {
+      addEffect('double');
+      CS.UI.toast(tr('mDouble'));
+    } else if (kind === 'turbo') {
+      addEffect('turbo');
+      CS.UI.toast(tr('mTurbo'));
+    } else if (kind === 'life') {
+      if (lives < MAX_LIVES) lives++;
+      updateLivesHud();
+      CS.FX.burst(px, py, '#ff2d55', 14);
+      CS.Audio.sfx('life');
+      CS.UI.toast(tr('mLifeRe'));
+    } else if (kind === 'reverse') {
+      addEffect('reverse');
+      CS.Audio.sfx('reverse');
+      CS.UI.toast(tr('mReverse'));
+    } else if (kind === 'split') {
+      CS.Audio.sfx('split');
+      splitSnake();
+      CS.UI.toast(tr('mSplit'));
+    } else if (kind === 'death') {
+      CS.UI.toast(tr('mDeath'));
+      die(); // spare lives still save, as everywhere else (T8)
+    }
+  }
+
+  /* the mystery 'split': the snake sheds everything past 3 segments;
+     the first and the last shed cells hatch exactly two escaped cores */
+  function splitSnake() {
+    if (snake.length <= SPLIT_MIN_LEN) return; // too short to shed
+    const shed = [];
+    for (let i = SPLIT_KEEP; i < snake.length; i++) {
+      shed.push({ x: snake[i].curr.x, y: snake[i].curr.y });
+      CS.FX.burst(
+        snake[i].curr.x * CELL + CELL / 2,
+        snake[i].curr.y * CELL + CELL / 2,
+        segColor(i, snake.length),
+        8
+      );
+    }
+    snake.length = SPLIT_KEEP;
+    const occ = occupiedKeys();
+    const first = escapedSpot(shed[0], occ);
+    if (first) {
+      escaped.push(first);
+      occ.add(key(first.x, first.y));
+    }
+    const last = escapedSpot(shed[shed.length - 1], occ);
+    if (last) escaped.push(last);
+    CS.FX.shake(6);
+  }
+
+  /* a shed cell, or a free neighbour when it is taken */
+  function escapedSpot(cell, occ) {
+    if (!occ.has(key(cell.x, cell.y))) return { x: cell.x, y: cell.y, t: ESCAPED_LIFE };
+    for (let k = 0; k < DIRS4.length; k++) {
+      const nx = cell.x + DIRS4[k].x;
+      const ny = cell.y + DIRS4[k].y;
+      if (nx < 0 || nx >= GRID_W || ny < 0 || ny >= GRID_H) continue;
+      if (!occ.has(key(nx, ny))) return { x: nx, y: ny, t: ESCAPED_LIFE };
+    }
+    return null;
+  }
+
+  /* one cell away from the head per tick: pick the neighbour that
+     grows the manhattan distance the most, avoiding walls, the snake
+     and the other core; a cornered core stands still */
+  function moveEscapedCores() {
+    if (!escaped.length || !snake.length) return;
+    const head = snake[0].curr;
+    const blocked = new Set();
+    for (let i = 0; i < snake.length; i++) {
+      blocked.add(key(snake[i].curr.x, snake[i].curr.y));
+    }
+    for (let i = 0; i < escaped.length; i++) {
+      blocked.add(key(escaped[i].x, escaped[i].y)); // cores block each other
+    }
+    for (let i = 0; i < escaped.length; i++) {
+      const c = escaped[i];
+      const dist = manhattan(c, head);
+      let best = null;
+      let bestDist = dist;
+      for (let k = 0; k < DIRS4.length; k++) {
+        const nx = c.x + DIRS4[k].x;
+        const ny = c.y + DIRS4[k].y;
+        if (nx < 0 || nx >= GRID_W || ny < 0 || ny >= GRID_H) continue;
+        if (blocked.has(key(nx, ny))) continue;
+        const nd = manhattan({ x: nx, y: ny }, head);
+        if (nd > bestDist) {
+          bestDist = nd;
+          best = { x: nx, y: ny };
+        }
+      }
+      if (best) {
+        blocked.delete(key(c.x, c.y));
+        c.x = best.x;
+        c.y = best.y;
+        blocked.add(key(c.x, c.y));
+      }
+    }
+  }
+
+  /* escaped cores dissolve when their time runs out */
+  function updateEscaped(dt) {
+    for (let i = escaped.length - 1; i >= 0; i--) {
+      escaped[i].t -= dt;
+      if (escaped[i].t <= 0) {
+        CS.FX.burst(
+          escaped[i].x * CELL + CELL / 2,
+          escaped[i].y * CELL + CELL / 2,
+          '#ff2bd6', 6
+        );
+        escaped.splice(i, 1);
+      }
+    }
+  }
+
+  /* ---------- feature T11: the tail bank (SPEC §14) ---------- */
+
+  function scheduleBankTimer() {
+    bankTimer = BANK_MIN + Math.random() * (BANK_MAX - BANK_MIN); // 30±8 s
+  }
+
+  function spawnBank() {
+    const occ = occupiedKeys();
+    const free = [];
+    for (let y = BANK_ZONE.y0; y <= BANK_ZONE.y1; y++) {
+      for (let x = BANK_ZONE.x0; x <= BANK_ZONE.x1; x++) {
+        if (!occ.has(key(x, y))) free.push({ x: x, y: y });
+      }
+    }
+    if (!free.length) return false;
+    const c = free[Math.floor(Math.random() * free.length)];
+    bank = { x: c.x, y: c.y, t: BANK_LIFE };
+    return true;
+  }
+
+  /* the bank lives on its own schedule; it also runs during a boss
+     fight (SPEC §14). An expired portal dissolves and the next one
+     is planned */
+  function updateBank(dt) {
+    if (bank) {
+      bank.t -= dt;
+      if (bank.t <= 0) {
+        CS.FX.burst(bank.x * CELL + CELL / 2, bank.y * CELL + CELL / 2, '#00ff9d', 8);
+        bank = null;
+        scheduleBankTimer();
+      }
+      return;
+    }
+    bankTimer -= dt;
+    if (bankTimer > 0) return;
+    if (spawnBank()) scheduleBankTimer();
+    else bankTimer = 1; // the inner zone was full: retry in a second
+  }
+
+  /* the head entering the portal converts every segment past 4 into
+     points (x15 x level, with the double/surge multipliers), or pays
+     a flat 50 "deposit interest" when the snake is already short */
+  function collectBank() {
+    bank = null;
+    scheduleBankTimer();
+    CS.Audio.sfx('bank');
+    CS.FX.shake(4);
+    if (snake.length > BANK_KEEP) {
+      const n = snake.length - BANK_KEEP;
+      for (let i = snake.length - 1; i >= BANK_KEEP; i--) {
+        CS.FX.burst(
+          snake[i].curr.x * CELL + CELL / 2,
+          snake[i].curr.y * CELL + CELL / 2,
+          segColor(i, snake.length),
+          8
+        );
+      }
+      snake.length = BANK_KEEP;
+      CS.UI.toast(tr('bankToast', addScore(n * BANK_SEGMENT_SCORE * level)));
+    } else {
+      addScore(BANK_INTEREST);
+      CS.UI.toast(tr('bankInterest'));
+    }
+  }
+
   /* ---------- the snake tick ---------- */
 
   function step() {
@@ -802,6 +1112,22 @@
       }
     }
 
+    // feature T11: a mystery death emptied the snake — nothing left to do
+    if (!snake.length) return;
+
+    // feature T11: the head catching an escaped core
+    for (let i = escaped.length - 1; i >= 0; i--) {
+      if (escaped[i].x === nx && escaped[i].y === ny) {
+        escaped.splice(i, 1);
+        addScore(ESCAPED_SCORE);
+        CS.Audio.sfx('pickup');
+        CS.FX.burst(nx * CELL + CELL / 2, ny * CELL + CELL / 2, '#ff2bd6', 12);
+      }
+    }
+
+    // feature T11: the head entering the tail bank portal
+    if (bank && bank.x === nx && bank.y === ny) collectBank();
+
     // feature T9: the head passing a debris cell reabsorbs the segment
     for (let i = debris.length - 1; i >= 0; i--) {
       if (debris[i].x === nx && debris[i].y === ny) {
@@ -819,6 +1145,9 @@
 
     // the magnet sweeps around the fresh head position (feature T8)
     magnetCollect();
+
+    // feature T11: the escaped cores flee one cell from the fresh head
+    moveEscapedCores();
 
     // the field was too crowded for a spawn earlier: retry
     if (!food) spawnFood();
@@ -850,6 +1179,9 @@
     pickups = [];      // feature T8
     effects = [];
     debris = [];       // feature T9
+    escaped = [];      // feature T11
+    bank = null;       // feature T11
+    scheduleBankTimer();
     lives = 0;
     respawnTimer = 0;
     invulnTimer = 0;
@@ -893,6 +1225,8 @@
     pickups = [];      // feature T8
     effects = [];
     debris = [];       // feature T9
+    escaped = [];      // feature T11
+    bank = null;       // feature T11
     invulnTimer = 0;
     applySpeed();      // drop surge/slow multipliers from stepInterval
     renderEffectsHud();
@@ -980,6 +1314,10 @@
 
   function queueDir(d) {
     if (state !== 'playing' && state !== 'boss') return;
+    // feature T11: 'reverse' inverts the incoming vector only — the
+    // buffer rules, the reversal ban and the magnet autopilot are
+    // untouched (the magnet is not a direction)
+    if (hasEffect('reverse')) d = { x: -d.x, y: -d.y };
     const last = dirQueue.length ? dirQueue[dirQueue.length - 1] : dir;
     if (d.x === last.x && d.y === last.y) return;      // repeat
     if (d.x === -last.x && d.y === -last.y) return;    // 180-degree reversal
@@ -1101,6 +1439,8 @@
       updatePickups(dt);   // feature T8
       updateEffects(dt);   // feature T8
       updateDebris(dt);    // feature T9
+      updateEscaped(dt);   // feature T11
+      updateBank(dt);      // feature T11
 
       if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
 
@@ -1169,6 +1509,8 @@
       drawBonus();
       drawPickups(); // feature T8
       drawDebris();  // feature T9
+      drawEscaped(); // feature T11
+      drawBank();    // feature T11
       if (fight && fight.active) fight.draw(g, CELL); // draws its charges itself
       drawSnake();
     }
@@ -1358,6 +1700,20 @@
     g.fill();
   }
 
+  /* feature T11: a pulsating frame cube with a bold '?' — the content
+     is unknown until the pickup; the glow blinks cyan <-> magenta */
+  function drawMysteryShape(s, color) {
+    g.strokeStyle = color;
+    g.lineWidth = 2;
+    g.strokeRect(-s / 2, -s / 2, s, s);
+    g.shadowBlur = 0; // the '?' stays crisp inside the glowing frame
+    g.fillStyle = color;
+    g.font = 'bold ' + Math.round(s * 0.72) + 'px "Cascadia Mono", Consolas, monospace';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('?', 0, s * 0.06);
+  }
+
   function drawPickups() {
     for (let i = 0; i < pickups.length; i++) {
       const p = pickups[i];
@@ -1371,6 +1727,8 @@
         : p.type === 'magnet' ? '#00f0ff'
         : p.type === 'slow' ? '#7de3ff'
         : p.type === 'virus' ? '#ff7a00'
+        : p.type === 'mystery' ? mixRgb([0, 240, 255], [255, 43, 214], // feature T11
+            0.5 + 0.5 * Math.sin(animTime * 4 + i * 1.7))
         : '#ffe600';
       g.save();
       g.translate(cx, cy);
@@ -1382,6 +1740,7 @@
       else if (p.type === 'magnet') drawMagnetShape(s);
       else if (p.type === 'slow') drawSnowflakeShape(s);
       else if (p.type === 'virus') drawSkullShape(s);
+      else if (p.type === 'mystery') drawMysteryShape(s, color); // feature T11
       else drawGoldenShape(s);
       g.restore();
     }
@@ -1408,6 +1767,81 @@
       g.strokeRect(x + 7.5, y + 7.5, CELL - 15, CELL - 15);
       g.restore();
     }
+  }
+
+  /* feature T11: escaped cores — frantic purple spheres with a panic
+     jitter, blinking away during the last two seconds */
+  function drawEscaped() {
+    for (let i = 0; i < escaped.length; i++) {
+      const c = escaped[i];
+      if (c.t <= ESCAPED_BLINK && Math.floor(animTime * 8) % 2 === 0) continue;
+      const jx = (Math.random() - 0.5) * 5; // panic jitter
+      const jy = (Math.random() - 0.5) * 5;
+      const pulse = 0.5 + 0.5 * Math.sin(animTime * 10 + i * 2.3);
+      g.save();
+      g.translate(c.x * CELL + CELL / 2 + jx, c.y * CELL + CELL / 2 + jy);
+      g.shadowColor = '#ff2bd6';
+      g.shadowBlur = 8 + 12 * pulse;
+      g.fillStyle = 'rgba(255,43,214,' + (0.55 + 0.4 * pulse).toFixed(3) + ')';
+      g.beginPath();
+      g.arc(0, 0, CELL * 0.26 + pulse * 2.5, 0, Math.PI * 2);
+      g.fill();
+      g.shadowBlur = 0;
+      g.fillStyle = '#ffd7f6'; // inner glint
+      g.beginPath();
+      g.arc(-CELL * 0.07, -CELL * 0.07, CELL * 0.07, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+  }
+
+  /* feature T11: flat-top hexagon path of radius r around (0,0) */
+  function hexPath(r) {
+    g.beginPath();
+    for (let k = 0; k < 6; k++) {
+      const a = Math.PI / 6 + k * Math.PI / 3;
+      const x = Math.cos(a) * r;
+      const y = Math.sin(a) * r;
+      if (k === 0) g.moveTo(x, y);
+      else g.lineTo(x, y);
+    }
+    g.closePath();
+  }
+
+  /* feature T11: the tail bank — a hexagon with a double pulsing
+     green->cyan frame and a diamond token inside; blinks during the
+     last two seconds */
+  function drawBank() {
+    if (!bank) return;
+    if (bank.t <= BANK_BLINK && Math.floor(animTime * 8) % 2 === 0) return;
+    const cx = bank.x * CELL + CELL / 2;
+    const cy = bank.y * CELL + CELL / 2;
+    const k = 0.5 + 0.5 * Math.sin(animTime * 2.6);    // green <-> cyan
+    const pulse = 0.5 + 0.5 * Math.sin(animTime * 5);  // frame pulsation
+    const color = mixRgb([0, 255, 157], [0, 240, 255], k);
+    g.save();
+    g.translate(cx, cy);
+    g.shadowColor = color;
+    g.shadowBlur = 8 + 10 * pulse;
+    g.strokeStyle = color;
+    g.lineWidth = 2.5;
+    hexPath(CELL * 0.46);
+    g.stroke();
+    g.lineWidth = 1.5;
+    hexPath(CELL * (0.3 + 0.05 * pulse)); // the inner ring breathes
+    g.stroke();
+    g.shadowBlur = 0;
+    g.fillStyle = color;
+    g.beginPath(); // the deposit diamond token
+    g.moveTo(0, -CELL * 0.16);
+    g.lineTo(CELL * 0.11, 0);
+    g.lineTo(0, CELL * 0.16);
+    g.lineTo(-CELL * 0.11, 0);
+    g.closePath();
+    g.fill();
+    g.fillStyle = BG; // a dark slot across the diamond
+    g.fillRect(-CELL * 0.015, -CELL * 0.1, CELL * 0.03, CELL * 0.2);
+    g.restore();
   }
 
   function drawSnake() {

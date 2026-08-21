@@ -74,6 +74,16 @@
       pFreeze: 'ЗАМОРОЗКА',
       respawnToast: 'ПЕРЕЗАПУСК СИСТЕМЫ...',
       livesLabel: 'Жизни',
+      /* feature T11: mystery containers + tail bank (SPEC §14) */
+      mJackpot: 'ДЖЕКПОТ +500',
+      mDouble: '×2 ОЧКИ 10 С',
+      mTurbo: 'ТУРБО! ×2 СКОРОСТЬ',
+      mLifeRe: '+1 ЖИЗНЬ',
+      mReverse: 'РЕВЕРС УПРАВЛЕНИЯ!',
+      mSplit: 'РАСПАД! ЛОВИ ЯДРА!',
+      mDeath: 'ФАТАЛЬНАЯ ОШИБКА',
+      bankToast: 'ХВОСТ → +{1} ОЧКОВ',
+      bankInterest: 'ПРОЦЕНТЫ ПО ВКЛАДУ +50',
       /* feature T10: leaderboard (SPEC §13) */
       board: 'Лидеры',
       boardTitle: 'ЛИДЕРЫ',
@@ -147,6 +157,16 @@
       pFreeze: 'FROZEN',
       respawnToast: 'SYSTEM REBOOT...',
       livesLabel: 'Lives',
+      /* feature T11: mystery containers + tail bank (SPEC §14) */
+      mJackpot: 'JACKPOT +500',
+      mDouble: '×2 SCORE 10S',
+      mTurbo: 'TURBO! ×2 SPEED',
+      mLifeRe: '+1 LIFE',
+      mReverse: 'CONTROLS REVERSED!',
+      mSplit: 'SPLIT! CATCH THE CORES!',
+      mDeath: 'FATAL ERROR',
+      bankToast: 'TAIL → +{1} POINTS',
+      bankInterest: 'DEPOSIT INTEREST +50',
       /* feature T10: leaderboard (SPEC §13) */
       board: 'Leaders',
       boardTitle: 'LEADERS',

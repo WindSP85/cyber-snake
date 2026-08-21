@@ -753,6 +753,59 @@
       const g = mkGain(t, 0.15, 0.38, 0.02);
       o.connect(f); f.connect(g); g.connect(sfxBus);
       reg(o, [f, g]); reg(lfo, [depth]);
+    },
+
+    /* feature T11: slot machine — 3 fast random-pitch slot blips */
+    mystery: function (t) {
+      for (let i = 0; i < 3; i++) {
+        const tt = t + i * 0.07;
+        const midi = 62 + Math.floor(Math.random() * 9) + i * 2;
+        const o = mkOsc('square', NOTE(midi), tt, tt + 0.08);
+        const g = mkGain(tt, 0.2, 0.07);
+        o.connect(g); g.connect(sfxBus); reg(o, [g]);
+      }
+    },
+
+    /* feature T11: two-tone alarm sliding down (reversed controls) */
+    reverse: function (t) {
+      [[720, 0, 0.16], [520, 0.15, 0.3]].forEach(function (n) {
+        const tt = t + n[1];
+        const o = mkOsc('square', n[0], tt, tt + n[2] + 0.05);
+        o.frequency.linearRampToValueAtTime(n[0] * 0.72, tt + n[2]);
+        const g = mkGain(tt, 0.19, n[2]);
+        o.connect(g); g.connect(sfxBus); reg(o, [g]);
+      });
+    },
+
+    /* feature T11: 5 rising short coin blips (the tail bank payout) */
+    bank: function (t) {
+      for (let i = 0; i < 5; i++) {
+        const tt = t + i * 0.055;
+        const midi = 72 + i * 2; // coin ladder up
+        const o = mkOsc('square', NOTE(midi), tt, tt + 0.1);
+        const g = mkGain(tt, 0.16, 0.09);
+        o.connect(g); g.connect(sfxBus); reg(o, [g]);
+        const o2 = mkOsc('sine', NOTE(midi) * 2, tt, tt + 0.08);
+        const g2 = mkGain(tt, 0.06, 0.07);
+        o2.connect(g2); g2.connect(sfxBus); reg(o2, [g2]);
+      }
+    },
+
+    /* feature T11: tearing electric discharge (the split) */
+    split: function (t) {
+      const o = mkOsc('sawtooth', 1800, t, t + 0.45);
+      o.frequency.exponentialRampToValueAtTime(120, t + 0.4);
+      const f = mkFilter('bandpass', 2400, t, 3);
+      f.frequency.exponentialRampToValueAtTime(300, t + 0.42);
+      const g = mkGain(t, 0.32, 0.42, 0.01);
+      o.connect(f); f.connect(g); g.connect(sfxBus); reg(o, [f, g]);
+      [0.03, 0.12, 0.22, 0.33].forEach(function (off) {
+        const tt = t + off;
+        const n = mkNoise(tt, tt + 0.06);
+        const nf = mkFilter('highpass', 2600, tt);
+        const ng = mkGain(tt, 0.18, 0.05);
+        n.connect(nf); nf.connect(ng); ng.connect(sfxBus); reg(n, [nf, ng]);
+      });
     }
   };
 
