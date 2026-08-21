@@ -53,11 +53,18 @@ body::before {
   pointer-events: none;
 }
 
-/* ---------- Stage: 3:2, adaptive (max ~96vw, fits ~96vh too) ---------- */
+/* ---------- Layout: HUD bar above the 3:2 arena ---------- */
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(900px, 96vw, calc((100vh - 72px) * 1.5));
+}
 
 .stage {
   position: relative;
-  width: min(900px, 96vw, 144vh);
+  width: 100%;
   aspect-ratio: 3 / 2;
   background: var(--bg);
   border: 1px solid rgba(0, 240, 255, .25);
@@ -82,18 +89,14 @@ body::before {
 /* ---------- HUD ---------- */
 
 .hud {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 12px;
-  background: linear-gradient(rgba(10, 14, 30, .85), rgba(10, 14, 30, .45) 70%, transparent);
-  pointer-events: none;
+  padding: 8px 14px;
+  background: rgba(10, 14, 30, .92);
+  border: 1px solid rgba(0, 240, 255, .25);
+  box-shadow: 0 0 14px rgba(0, 240, 255, .08);
 }
 
 .hud-stats {
@@ -137,10 +140,6 @@ body::before {
 .hud-buttons {
   display: flex;
   gap: 8px;
-}
-
-.hud .btn {
-  pointer-events: auto;
 }
 
 /* ---------- Buttons: neon frames, hover fill + glow ---------- */
@@ -193,13 +192,41 @@ body::before {
     inset 0 0 14px rgba(255, 43, 214, .18);
 }
 
-.btn-hud {
-  padding: 6px 14px;
-  font-size: 12px;
-  letter-spacing: 1px;
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--cyan);
+  background: rgba(0, 240, 255, .04);
+  border: 1px solid rgba(0, 240, 255, .7);
+  cursor: pointer;
+  text-shadow: 0 0 8px rgba(0, 240, 255, .6);
+  box-shadow:
+    0 0 10px rgba(0, 240, 255, .18),
+    inset 0 0 10px rgba(0, 240, 255, .06);
+  transition: background .18s, color .18s, box-shadow .18s, transform .06s;
 }
 
-.btn-hud.muted {
+.btn-icon:hover,
+.btn-icon:focus-visible {
+  background: rgba(0, 240, 255, .14);
+  box-shadow:
+    0 0 22px rgba(0, 240, 255, .55),
+    inset 0 0 14px rgba(0, 240, 255, .18);
+  outline: none;
+}
+
+.btn-icon:active {
+  transform: translateY(1px);
+}
+
+.btn-icon.muted {
   color: var(--danger);
   border-color: rgba(255, 45, 85, .7);
   text-shadow: 0 0 8px rgba(255, 45, 85, .5);

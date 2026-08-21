@@ -463,7 +463,10 @@
   function updateMuteButton(muted) {
     const btn = document.getElementById('mute-btn');
     if (!btn) return;
-    btn.textContent = muted ? tr('soundOff') : tr('soundOn');
+    const key = muted ? 'soundOff' : 'soundOn';
+    btn.textContent = muted ? '🔇' : '🔊';
+    btn.title = tr(key);
+    btn.setAttribute('data-i18n-title', key);
     if (btn.classList && typeof btn.classList.toggle === 'function') {
       btn.classList.toggle('muted', muted);
     }

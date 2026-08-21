@@ -140,6 +140,10 @@
     for (let i = 0; i < nodes.length; i++) {
       nodes[i].textContent = CS.I18N.t(nodes[i].getAttribute('data-i18n'));
     }
+    const titled = document.querySelectorAll('[data-i18n-title]');
+    for (let i = 0; i < titled.length; i++) {
+      titled[i].setAttribute('title', CS.I18N.t(titled[i].getAttribute('data-i18n-title')));
+    }
     if (document.documentElement && typeof document.documentElement.setAttribute === 'function') {
       document.documentElement.setAttribute('lang', lang);
     }

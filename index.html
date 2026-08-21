@@ -7,10 +7,8 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <div class="stage">
-    <canvas id="game-canvas" width="900" height="600"></canvas>
-
-    <!-- HUD (SPEC §8) -->
+  <div class="layout">
+    <!-- HUD: панель НАД ареной, а не поверх игрового поля -->
     <div id="hud" class="hud">
       <div class="hud-stats">
         <div class="hud-stat">
@@ -27,10 +25,13 @@
         </div>
       </div>
       <div class="hud-buttons">
-        <button id="btn-pause" class="btn btn-hud" type="button" data-i18n="pauseBtn">Пауза</button>
-        <button id="mute-btn" class="btn btn-hud" type="button">Звук: вкл</button>
+        <button id="btn-pause" class="btn-icon" type="button" data-i18n-title="pauseBtn" title="Пауза">⏸</button>
+        <button id="mute-btn" class="btn-icon" type="button" data-i18n-title="soundOn" title="Звук: вкл">🔊</button>
       </div>
     </div>
+
+    <div class="stage">
+    <canvas id="game-canvas" width="900" height="600"></canvas>
 
     <!-- Boss bar (SPEC §8) -->
     <div id="bossbar" class="bossbar hidden">
@@ -147,7 +148,8 @@
     <div class="noise" aria-hidden="true"></div>
     <div class="scanlines" aria-hidden="true"></div>
     <div class="vignette" aria-hidden="true"></div>
-  </div>
+    </div><!-- /.stage -->
+  </div><!-- /.layout -->
 
   <!-- Scripts: i18n first, then the SPEC §7 order -->
   <script src="js/i18n.js"></script>

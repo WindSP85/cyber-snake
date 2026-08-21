@@ -60,7 +60,10 @@
     if (CS.Audio && typeof CS.Audio.getMuted === 'function') {
       muted = !!CS.Audio.getMuted();
     }
-    btn.textContent = muted ? t('soundOff') : t('soundOn');
+    const key = muted ? 'soundOff' : 'soundOn';
+    btn.textContent = muted ? '🔇' : '🔊';
+    btn.title = t(key);
+    btn.setAttribute('data-i18n-title', key);
     btn.classList.toggle('muted', muted);
   }
 
