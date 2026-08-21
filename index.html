@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NEON://SNAKE</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="stage">
+    <canvas id="game-canvas" width="900" height="600"></canvas>
+
+    <!-- HUD (SPEC §8) -->
+    <div id="hud" class="hud">
+      <div class="hud-stats">
+        <div class="hud-stat">
+          <span class="hud-label">Счёт</span>
+          <span id="score" class="hud-value">0</span>
+        </div>
+        <div class="hud-stat">
+          <span class="hud-label">Рекорд</span>
+          <span id="best" class="hud-value">0</span>
+        </div>
+        <div class="hud-stat">
+          <span class="hud-label">Уровень</span>
+          <span id="level" class="hud-value">1</span>
+        </div>
+      </div>
+      <div class="hud-buttons">
+        <button id="btn-pause" class="btn btn-hud" type="button">Пауза</button>
+        <button id="mute-btn" class="btn btn-hud" type="button">Звук: вкл</button>
+      </div>
+    </div>
+
+    <!-- Boss bar (SPEC §8) -->
+    <div id="bossbar" class="bossbar hidden">
+      <div id="bossname" class="bossname">СТРАЖ СЕТИ</div>
+      <div class="bosstrack"><div id="bossfill" class="bossfill"></div></div>
+    </div>
+
+    <!-- Central toast (SPEC §8) -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Boss warning banner (SPEC §8) -->
+    <div id="boss-banner" class="boss-banner hidden"></div>
+
+    <!-- Screen: menu -->
+    <div id="screen-menu" class="screen">
+      <div class="panel">
+        <h1 class="title glitch" data-text="NEON://SNAKE">NEON://SNAKE</h1>
+        <p class="subtitle">киберпротокол v2.077</p>
+        <p class="menu-best">Рекорд: <span id="menu-best">0</span></p>
+        <div class="menu-buttons">
+          <button id="btn-start" class="btn btn-primary" type="button">Играть</button>
+          <button id="btn-controls" class="btn" type="button">Управление</button>
+        </div>
+        <p class="hint">Enter — старт · M — звук</p>
+      </div>
+    </div>
+
+    <!-- Screen: controls (table from SPEC §2) -->
+    <div id="screen-controls" class="screen hidden">
+      <div class="panel">
+        <h2 class="screen-title">Управление</h2>
+        <table class="controls-table">
+          <thead>
+            <tr>
+              <th>Действие</th>
+              <th>Клавиши</th>
+              <th>Тач</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Направление</td>
+              <td>Стрелки и WASD (одновременно)</td>
+              <td>Свайпы в 4 стороны (порог 24px)</td>
+            </tr>
+            <tr>
+              <td>Пауза</td>
+              <td>Space или Esc</td>
+              <td>Кнопка паузы в HUD</td>
+            </tr>
+            <tr>
+              <td>Старт / рестарт</td>
+              <td>Enter</td>
+              <td>Кнопки «Играть» / «Заново»</td>
+            </tr>
+            <tr>
+              <td>Звук вкл/выкл</td>
+              <td>M</td>
+              <td>Кнопка звука в HUD</td>
+            </tr>
+          </tbody>
+        </table>
+        <button id="btn-controls-back" class="btn" type="button">В меню</button>
+      </div>
+    </div>
+
+    <!-- Screen: pause -->
+    <div id="screen-pause" class="screen hidden">
+      <div class="panel">
+        <h2 class="screen-title">Пауза</h2>
+        <div class="menu-buttons">
+          <button id="btn-resume" class="btn btn-primary" type="button">Продолжить</button>
+          <button id="btn-menu" class="btn" type="button">В меню</button>
+        </div>
+        <p class="hint">Space — продолжить</p>
+      </div>
+    </div>
+
+    <!-- Screen: game over -->
+    <div id="screen-gameover" class="screen hidden">
+      <div class="panel panel-danger">
+        <h2 class="screen-title danger">Игра окончена</h2>
+        <div class="final-stats">
+          <div class="final-stat">
+            <span class="hud-label">Счёт</span>
+            <span id="final-score" class="final-value">0</span>
+          </div>
+          <div class="final-stat">
+            <span class="hud-label">Рекорд</span>
+            <span id="final-best" class="final-value final-best">0</span>
+          </div>
+        </div>
+        <div class="menu-buttons">
+          <button id="btn-restart" class="btn btn-primary" type="button">Заново</button>
+          <button id="btn-menu2" class="btn" type="button">В меню</button>
+        </div>
+        <p class="hint">Enter — заново</p>
+      </div>
+    </div>
+
+    <!-- CRT overlays (SPEC §6) -->
+    <div class="noise" aria-hidden="true"></div>
+    <div class="scanlines" aria-hidden="true"></div>
+    <div class="vignette" aria-hidden="true"></div>
+  </div>
+
+  <!-- Scripts: order is fixed by SPEC §7 -->
+  <script src="js/audio.js"></script>
+  <script src="js/bosses.js"></script>
+  <script src="js/fx.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
