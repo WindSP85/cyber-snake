@@ -986,6 +986,21 @@ body::before {
   margin-bottom: 16px;
 }
 
+/* feature T14: global/local mode badge (+"loading…" strip) under the
+   board title — muted cyan, only present in global mode */
+.board-mode {
+  display: block;
+  margin: -8px 0 14px;
+  font-size: 10px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(0, 240, 255, .5);
+}
+
+.board-mode + .board-mode {
+  margin: -12px 0 14px;
+}
+
 /* small danger-tinted "Clear" (double-click confirm) */
 .btn-small {
   padding: 8px 16px;

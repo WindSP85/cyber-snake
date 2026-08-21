@@ -90,6 +90,10 @@
       boardClear: 'Очистить',
       boardSure: 'Точно?',
       boardEmpty: 'ПОКА ПУСТО',
+      /* feature T14: global leaderboard mode badges */
+      boardGlobal: 'МИР',
+      boardLocal: 'ОФЛАЙН · ЛОКАЛЬНЫЙ ТОП',
+      boardLoading: 'ЗАГРУЗКА…',
       savePrompt: 'ВЫ В ТОП-10! ИМЯ:',
       save: 'Сохранить',
       colPlace: '#',
@@ -173,6 +177,10 @@
       boardClear: 'Clear',
       boardSure: 'Sure?',
       boardEmpty: 'EMPTY YET',
+      /* feature T14: global leaderboard mode badges */
+      boardGlobal: 'GLOBAL',
+      boardLocal: 'OFFLINE · LOCAL TOP',
+      boardLoading: 'LOADING…',
       savePrompt: 'TOP-10! NAME:',
       save: 'Save',
       colPlace: '#',

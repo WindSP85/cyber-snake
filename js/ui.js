@@ -51,7 +51,7 @@
     if (typeof handlers[name] === 'function') handlers[name]();
   }
 
-  /* ---------- feature T10: leaderboard (SPEC §13) ---------- */
+  /* ---------- feature T10: leaderboard (SPEC §13; T14: global) ---------- */
 
   function appendCell(tr, text, className) {
     const td = document.createElement('td');
@@ -60,14 +60,17 @@
     tr.appendChild(td);
   }
 
-  /* rebuild the #board-list rows from CS.Leaderboard */
-  function renderBoard() {
+  function loadBoard() {
+    return (CS.Leaderboard && typeof CS.Leaderboard.load === 'function')
+      ? CS.Leaderboard.load()
+      : [];
+  }
+
+  /* rebuild the #board-list rows from an entry array */
+  function renderBoardRows(entries) {
     const list = byId('board-list');
     if (!list) return;
     list.innerHTML = '';
-    const entries = (CS.Leaderboard && typeof CS.Leaderboard.load === 'function')
-      ? CS.Leaderboard.load()
-      : [];
     if (!entries.length) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
@@ -89,6 +92,85 @@
       appendCell(tr, e.date, 'bd-date');
       list.appendChild(tr);
     }
+  }
+
+  /* ---------- feature T14: board mode badge + remote refresh ---------- */
+
+  /* one remote refresh at a time: a render while another request is
+     still in flight must not fire a second fetch */
+  let boardFetching = false;
+
+  /* the mode badge lives right under the board screen title; a JS-made
+     span so the markup (and the local-mode layout) stays untouched */
+  function boardBadge(id) {
+    const existing = byId(id);
+    if (existing) return existing;
+    const screen = byId('screen-board');
+    if (!screen || typeof screen.querySelector !== 'function') return null;
+    const title = screen.querySelector('.screen-title');
+    if (!title || !title.parentNode) return null;
+    const el = document.createElement('span');
+    el.id = id;
+    el.className = 'board-mode';
+    title.parentNode.insertBefore(el, title.nextSibling);
+    return el;
+  }
+
+  /* i18n key → badge text; null/'' → the badge is removed */
+  function setBoardMode(key) {
+    const el = byId('board-mode');
+    if (!key) {
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+      return;
+    }
+    const badge = boardBadge('board-mode');
+    if (badge) badge.textContent = t(key);
+  }
+
+  /* the "loading…" strip under the badge while a fetch is pending */
+  function setBoardLoading(on) {
+    const el = byId('board-loading');
+    if (!on) {
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+      return;
+    }
+    const badge = boardBadge('board-loading');
+    if (badge) badge.textContent = t('boardLoading');
+  }
+
+  /* local rows instantly; in global mode the badge goes up right away
+     and a guarded fetchRemote re-renders with the cloud top — or, on
+     any failure, falls back to the local board with an offline badge.
+     Every re-render refetches, so a fresh submit (which calls this
+     right after CS.Leaderboard.submit) always shows current data. */
+  function renderBoard() {
+    const list = byId('board-list');
+    if (!list) return;
+    const global = !!(CS.Leaderboard &&
+      typeof CS.Leaderboard.isGlobal === 'function' &&
+      CS.Leaderboard.isGlobal());
+    if (!global) {
+      setBoardMode(null);
+      setBoardLoading(false);
+      renderBoardRows(loadBoard());
+      return;
+    }
+    setBoardMode('boardGlobal');
+    renderBoardRows(loadBoard()); // instant placeholder while loading
+    if (boardFetching) return;    // fetch guard: one request at a time
+    boardFetching = true;
+    setBoardLoading(true);
+    CS.Leaderboard.fetchRemote(function (rows) {
+      boardFetching = false;
+      setBoardLoading(false);
+      if (rows && rows.length) {
+        setBoardMode('boardGlobal');
+        renderBoardRows(rows);
+      } else {
+        setBoardMode('boardLocal');
+        renderBoardRows(loadBoard());
+      }
+    });
   }
 
   /* the gameover name-save block — game.js decides when it shows */
