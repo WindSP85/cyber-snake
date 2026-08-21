@@ -16,7 +16,7 @@
 
   CS.Config = {
     /* заполняется при подключении облака (Supabase: Settings → API) */
-    supabaseUrl: '',
-    supabaseKey: ''
+    supabaseUrl: 'https://fjpwljcsumnabuymynpk.supabase.co',
+    supabaseKey: 'sb_publishable_ccfXAKoH5QhqVuTNxs6UUA_B83qU8WV'
   };
 })();
