@@ -847,11 +847,11 @@
     return type;
   }
 
-  function applyMystery(px, py) {
+  function applyMystery(px, py, forced) {
     CS.Audio.sfx('mystery');
     CS.FX.flash('#ffffff', 0.15);
     CS.FX.burst(px, py, '#ff2bd6', 14);
-    const kind = rollMystery();
+    const kind = forced || rollMystery();
     if (kind === 'jackpot') {
       addScore(MYSTERY_JACKPOT);
       CS.UI.toast(tr('mJackpot'));
@@ -1990,6 +1990,58 @@
 
     lastTs = 0;
     requestAnimationFrame(frame);
+  }
+
+  /* ---------- deterministic QA hooks: active only with ?debug=1 ---------- */
+
+  const DEBUG = (function () {
+    try { return /(^|[?&])debug=1/.test(window.location.search); } catch (e) { return false; }
+  })();
+
+  if (DEBUG) {
+    const cellAhead = function (d) {
+      const h = snake[0] && snake[0].curr;
+      if (!h) return null;
+      const x = Math.max(0, Math.min(GRID_W - 1, h.x + dir.x * (d || 2)));
+      const y = Math.max(0, Math.min(GRID_H - 1, h.y + dir.y * (d || 2)));
+      return { x: x, y: y };
+    };
+    CS.Debug = {
+      /* full state snapshot for the QA panel */
+      state: function () {
+        return {
+          state: state, score: score, level: level, lives: lives,
+          len: snake.length,
+          effects: effects.map(function (e) { return e.type + ':' + Math.ceil(e.timer); }),
+          pickups: pickups.map(function (p) { return p.type; }),
+          bank: bank ? bank.x + ',' + bank.y : null,
+          boss: fight && fight.active ? fight.name + ' hp' + fight.hp : null,
+          escaped: escaped.length
+        };
+      },
+      feed: function () { const c = cellAhead(2); if (c) food = { x: c.x, y: c.y }; },
+      grow: function (n) { growth += n || 5; },
+      setScore: function (n) { score = n || 0; CS.UI.hud({ score: score }); },
+      spawnPickup: function (type) {
+        const c = cellAhead(2);
+        if (c) pickups.push({ x: c.x, y: c.y, type: type, timer: PICKUP_LIFE });
+      },
+      spawnBank: function () {
+        const c = cellAhead(2);
+        if (c) { bank = { x: c.x, y: c.y, t: 10 }; bankTimer = 30; }
+      },
+      forceMystery: function (kind) {
+        if (!snake.length) return;
+        applyMystery(snake[0].curr.x * CELL + CELL / 2, snake[0].curr.y * CELL + CELL / 2, kind);
+      },
+      spawnBoss: function (idx) {
+        if (state === 'playing' || state === 'boss') startBoss(idx || 1);
+      },
+      clear: function () {
+        pickups = []; bank = null; escaped = []; effects = [];
+        applySpeed();
+      }
+    };
   }
 
   CS.Game = { boot: boot };

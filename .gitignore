@@ -18,3 +18,4 @@ publish.sh
 # Tests
 *-test.tmp.js
 *.tmp.js
+test.html
