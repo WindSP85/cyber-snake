@@ -37,6 +37,7 @@
   const INPUT_BUFFER = 3;
   const DIE_TIME = 1;               // death sequence length
   const BANNER_TIME = 2;            // boss warning banner on screen
+  const DMG_POP_TIME = 0.9;         // "-1" hit marker over the boss, seconds
   const SWIPE_MIN = 24;             // touch swipe threshold, px
 
   const PALETTE = ['#00f0ff', '#ff2bd6', '#ffe600', '#00ff9d', '#ff7a00'];
@@ -77,6 +78,7 @@
   let fight = null;                 // live CS.BossFight instance
   let pendingBoss = 0;              // boss index waiting for the current fight
   let lastBossHp = -1;
+  let dmgPops = [];                 // floating "-1" hit markers over the boss core
 
   let running = false;
   let lastTs = 0;
@@ -236,6 +238,7 @@
     CS.Audio.music('boss');
     CS.UI.bossBar(fight.hp, fight.maxHp, true, fight.name);
     lastBossHp = fight.hp;
+    CS.UI.toast(tr('hintBoss')); // how to damage the boss — right when it matters
   }
 
   function onBossDefeated() {
@@ -332,6 +335,9 @@
       CS.FX.burst(nx * CELL + CELL / 2, ny * CELL + CELL / 2, '#00ff9d', 10);
       CS.FX.shake(4);
       addScore(CHARGE_SCORE); // the fight may be over now (onDefeated ran)
+      if (fight && fight.active) {
+        dmgPops.push({ x: (fight.x + 1) * CELL, y: (fight.y + 1) * CELL, t: DMG_POP_TIME });
+      }
     }
 
     // every segment follows the one ahead of it
@@ -586,6 +592,11 @@
       }
     }
 
+    for (let i = dmgPops.length - 1; i >= 0; i--) {
+      dmgPops[i].t -= dt;
+      if (dmgPops[i].t <= 0) dmgPops.splice(i, 1);
+    }
+
     if (state === 'playing' || state === 'boss') {
       if (bonus) {
         bonus.timer -= dt;
@@ -649,6 +660,25 @@
       drawSnake();
     }
     CS.FX.draw(g);
+    drawDmgPops();
+  }
+
+  function drawDmgPops() {
+    for (let i = 0; i < dmgPops.length; i++) {
+      const p = dmgPops[i];
+      const k = p.t / DMG_POP_TIME;   // 1 → 0
+      const rise = (1 - k) * 26;      // floats 26 px up while fading
+      g.save();
+      g.globalAlpha = Math.max(0, Math.min(1, k * 1.4));
+      g.font = 'bold 22px "Cascadia Mono", Consolas, monospace';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.shadowColor = '#ff2d55';
+      g.shadowBlur = 10;
+      g.fillStyle = '#ff2d55';
+      g.fillText('-1', p.x, p.y - rise);
+      g.restore();
+    }
   }
 
   function drawGrid() {
