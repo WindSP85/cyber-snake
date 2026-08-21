@@ -806,6 +806,16 @@ body::before {
   box-shadow: 0 0 6px rgba(0, 240, 255, .8);
 }
 
+/* feature T9: cryogen freeze (icy white, distinct from the slow pickup) */
+.fx-freeze {
+  border-color: rgba(234, 250, 255, .7);
+}
+
+.fx-freeze .fx-bar {
+  background: #eafaff;
+  box-shadow: 0 0 6px rgba(234, 250, 255, .9);
+}
+
 @media (max-width: 640px) {
   .hud-effects {
     gap: 4px;

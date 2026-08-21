@@ -62,6 +62,14 @@
   const RESPAWN_INVULN = 2;         // invulnerability after a respawn
   const FX_HUD_INTERVAL = 0.2;      // effects DOM refresh, seconds
 
+  /* feature T9: new boss events (SPEC §12) */
+  const DEBRIS_LIFE = 5;            // cut segments stay on the field, seconds
+  const DEBRIS_SCORE = 50;          // per segment reabsorbed by the head
+  const DEBRIS_PENALTY = 25;        // per segment lost when debris expires
+  const BITE_MAX = 3;               // tail segments lost per devourer bite
+  const BITE_PENALTY = 25;          // score per bitten segment
+  const FREEZE_FACTOR = 0.45;       // tick speed multiplier while frozen
+
   /* weighted pickup types; 'life' is excluded while lives are full */
   const PICKUP_TYPES = [
     { type: 'virus', weight: 30 },
@@ -72,9 +80,9 @@
     { type: 'life', weight: 10 }
   ];
 
-  const EFFECT_DUR = { surge: SURGE_TIME, slow: SLOW_TIME, magnet: MAGNET_TIME };
-  const EFFECT_ICON = { surge: '⚡', slow: '❄', magnet: '🧲' };
-  const EFFECT_LABEL = { surge: 'pSurge', slow: 'pSlow', magnet: 'pMagnet' };
+  const EFFECT_DUR = { surge: SURGE_TIME, slow: SLOW_TIME, magnet: MAGNET_TIME, freeze: 3 };
+  const EFFECT_ICON = { surge: '⚡', slow: '❄', magnet: '🧲', freeze: '🧊' };
+  const EFFECT_LABEL = { surge: 'pSurge', slow: 'pSlow', magnet: 'pMagnet', freeze: 'pFreeze' };
 
   const PALETTE = ['#00f0ff', '#ff2bd6', '#ffe600', '#00ff9d', '#ff7a00'];
   const BG = '#04050c';
@@ -125,6 +133,9 @@
   let invulnTimer = 0;              // post-respawn invulnerability
   let fxHudTimer = 0;               // effects DOM refresh counter
   let fxHudSig = '';                // last rendered effect set signature
+
+  /* feature T9: segments cut off by the decompiler beam */
+  let debris = [];                  // [{x,y,t}] — pulsing cyan, 5 s to live
 
   let running = false;
   let lastTs = 0;
@@ -211,19 +222,21 @@
     return false;
   }
 
-  function addEffect(type) {
-    const dur = EFFECT_DUR[type];
-    if (!dur) return;
+  /* dur overrides the table default (feature T9: onFreeze carries one) */
+  function addEffect(type, dur) {
+    let d = EFFECT_DUR[type];
+    if (typeof dur === 'number' && Number.isFinite(dur) && dur > 0) d = dur;
+    if (!d) return;
     for (let i = 0; i < effects.length; i++) {
       if (effects[i].type === type) {
-        effects[i].timer = dur; // refresh an already running effect
-        effects[i].total = dur;
-        if (type === 'surge' || type === 'slow') applySpeed();
+        effects[i].timer = d; // refresh an already running effect
+        effects[i].total = d;
+        if (type === 'surge' || type === 'slow' || type === 'freeze') applySpeed();
         return;
       }
     }
-    effects.push({ type: type, timer: dur, total: dur });
-    if (type === 'surge' || type === 'slow') applySpeed();
+    effects.push({ type: type, timer: d, total: d });
+    if (type === 'surge' || type === 'slow' || type === 'freeze') applySpeed();
   }
 
   function updateEffects(dt) {
@@ -231,11 +244,12 @@
     for (let i = effects.length - 1; i >= 0; i--) {
       effects[i].timer -= dt;
       if (effects[i].timer <= 0) {
-        if (effects[i].type === 'surge' || effects[i].type === 'slow') speedDirty = true;
+        if (effects[i].type === 'surge' || effects[i].type === 'slow' ||
+            effects[i].type === 'freeze') speedDirty = true;
         effects.splice(i, 1);
       }
     }
-    // surge and slow stack multiplicatively; recompute on expiry
+    // surge / slow / freeze stack multiplicatively; recompute on expiry
     if (speedDirty) applySpeed();
   }
 
@@ -250,6 +264,9 @@
     if (bonus) occ.add(key(bonus.x, bonus.y));
     for (let i = 0; i < pickups.length; i++) { // feature T8
       occ.add(key(pickups[i].x, pickups[i].y));
+    }
+    for (let i = 0; i < debris.length; i++) { // feature T9
+      occ.add(key(debris[i].x, debris[i].y));
     }
     if (fight && fight.active) {
       const haz = fight.hazardCells();
@@ -375,6 +392,8 @@
     // level-based base (which stays frozen during a boss fight)
     if (hasEffect('surge')) tps *= SURGE_SPEED;
     if (hasEffect('slow')) tps *= SLOW_FACTOR;
+    // feature T9: the cryogen freeze multiplies on top of everything
+    if (hasEffect('freeze')) tps *= FREEZE_FACTOR;
     stepInterval = 1 / tps;
   }
 
@@ -403,8 +422,76 @@
       },
       onSfx: function (name) {
         CS.Audio.sfx(name);
-      }
+      },
+      /* feature T9 (SPEC §12): all optional on the boss side, but the
+         game always provides them */
+      onCut: onBossCut,
+      onTailBite: onBossTailBite,
+      onFreeze: onBossFreeze
     };
+  }
+
+  /* ---------- feature T9: boss event handlers (SPEC §12) ---------- */
+
+  /* decompiler beam: everything from the cut index to the tail drops
+     off as debris; the snake keeps at least 3 segments */
+  function onBossCut(segmentIndex) {
+    if (!snake.length) return;
+    let cut = Math.floor(Number(segmentIndex));
+    if (!Number.isFinite(cut)) return;
+    cut = Math.max(3, Math.min(cut, snake.length));
+    if (cut >= snake.length) return; // shorter than the minimum — no drop
+    for (let i = cut; i < snake.length; i++) {
+      const c = snake[i].curr;
+      debris.push({ x: c.x, y: c.y, t: DEBRIS_LIFE });
+      CS.FX.burst(c.x * CELL + CELL / 2, c.y * CELL + CELL / 2, '#00f0ff', 8);
+    }
+    snake.length = cut;
+    CS.FX.shake(6);
+  }
+
+  /* debris lifetimes: 5 s to reabsorb, then -25 per lost segment */
+  function updateDebris(dt) {
+    if (!debris.length) return;
+    let expired = 0;
+    for (let i = debris.length - 1; i >= 0; i--) {
+      debris[i].t -= dt;
+      if (debris[i].t <= 0) {
+        CS.FX.burst(
+          debris[i].x * CELL + CELL / 2,
+          debris[i].y * CELL + CELL / 2,
+          '#3a5a6a', 4
+        );
+        debris.splice(i, 1);
+        expired++;
+      }
+    }
+    if (expired) penalizeScore(DEBRIS_PENALTY * expired);
+  }
+
+  /* devourer bite: up to 3 tail segments, min length 3, -25 each */
+  function onBossTailBite() {
+    CS.Audio.sfx('gulp');
+    CS.FX.shake(5);
+    if (snake.length <= 3) return; // nothing edible left
+    const n = Math.min(BITE_MAX, snake.length - 3);
+    for (let i = 0; i < n; i++) {
+      const tail = snake.pop();
+      CS.FX.burst(
+        tail.curr.x * CELL + CELL / 2,
+        tail.curr.y * CELL + CELL / 2,
+        '#ff2d55', 8
+      );
+      penalizeScore(BITE_PENALTY);
+    }
+  }
+
+  /* cryogen wave: tick speed x0.45 for d seconds (stacks with surge/slow) */
+  function onBossFreeze(d) {
+    const dur = Number(d);
+    if (!Number.isFinite(dur) || dur <= 0) return;
+    addEffect('freeze', Math.min(dur, 10));
+    CS.FX.flash('#7de3ff', 0.18);
   }
 
   function startBoss(idx) {
@@ -518,6 +605,7 @@
     pendingBoss = 0;
     pickups = [];      // feature T8
     effects = [];
+    debris = [];       // feature T9
     invulnTimer = 0;
     applySpeed();      // drop surge/slow multipliers from stepInterval
     renderEffectsHud();
@@ -658,6 +746,21 @@
       }
     }
 
+    // feature T9: the head passing a debris cell reabsorbs the segment
+    for (let i = debris.length - 1; i >= 0; i--) {
+      if (debris[i].x === nx && debris[i].y === ny) {
+        debris.splice(i, 1);
+        const tail = snake[snake.length - 1];
+        snake.push({
+          prev: { x: tail.curr.x, y: tail.curr.y },
+          curr: { x: tail.curr.x, y: tail.curr.y }
+        });
+        addScore(DEBRIS_SCORE);
+        CS.Audio.sfx('pickup');
+        CS.FX.burst(nx * CELL + CELL / 2, ny * CELL + CELL / 2, '#00f0ff', 10);
+      }
+    }
+
     // the magnet sweeps around the fresh head position (feature T8)
     magnetCollect();
 
@@ -689,6 +792,7 @@
     stepTimer = 0;
     pickups = [];      // feature T8
     effects = [];
+    debris = [];       // feature T9
     lives = 0;
     respawnTimer = 0;
     invulnTimer = 0;
@@ -731,6 +835,7 @@
     bonus = null;
     pickups = [];      // feature T8
     effects = [];
+    debris = [];       // feature T9
     invulnTimer = 0;
     applySpeed();      // drop surge/slow multipliers from stepInterval
     renderEffectsHud();
@@ -938,6 +1043,7 @@
       }
       updatePickups(dt);   // feature T8
       updateEffects(dt);   // feature T8
+      updateDebris(dt);    // feature T9
 
       if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
 
@@ -1005,6 +1111,7 @@
       drawFood();
       drawBonus();
       drawPickups(); // feature T8
+      drawDebris();  // feature T9
       if (fight && fight.active) fight.draw(g, CELL); // draws its charges itself
       drawSnake();
     }
@@ -1223,6 +1330,29 @@
     }
   }
 
+  /* feature T9: cut-off segments pulse in cyan on their cells,
+     blinking during the last two seconds */
+  function drawDebris() {
+    for (let i = 0; i < debris.length; i++) {
+      const d = debris[i];
+      if (d.t <= 2 && Math.floor(animTime * 8) % 2 === 0) continue;
+      const pulse = 0.5 + 0.5 * Math.sin(animTime * 6 + i * 1.3);
+      const x = d.x * CELL;
+      const y = d.y * CELL;
+      g.save();
+      g.shadowColor = '#00f0ff';
+      g.shadowBlur = 6 + 10 * pulse;
+      g.fillStyle = 'rgba(0,240,255,' + (0.3 + 0.4 * pulse).toFixed(3) + ')';
+      roundRect(g, x + 4, y + 4, CELL - 8, CELL - 8, 4);
+      g.fill();
+      g.shadowBlur = 0;
+      g.strokeStyle = '#bffcff';
+      g.lineWidth = 1.5;
+      g.strokeRect(x + 7.5, y + 7.5, CELL - 15, CELL - 15);
+      g.restore();
+    }
+  }
+
   function drawSnake() {
     const n = snake.length;
     if (!n) return; // feature T8: empty during the 'respawning' reboot
@@ -1252,6 +1382,14 @@
     }
     roundRect(g, x + pad, y + pad, CELL - pad * 2, CELL - pad * 2, isHead ? 8 : 6);
     g.fill();
+    if (hasEffect('freeze')) {
+      // feature T9: pale ice shell while the cryogen freeze holds
+      g.shadowBlur = 0;
+      g.strokeStyle = 'rgba(125,227,255,0.75)';
+      g.lineWidth = 1.5;
+      roundRect(g, x + pad + 1, y + pad + 1, CELL - pad * 2 - 2, CELL - pad * 2 - 2, 5);
+      g.stroke();
+    }
     if (isHead) {
       // eyes look along the movement direction
       g.shadowBlur = 0;
@@ -1266,6 +1404,26 @@
       g.arc(fx + px * off, fy + py * off, r, 0, Math.PI * 2);
       g.arc(fx - px * off, fy - py * off, r, 0, Math.PI * 2);
       g.fill();
+      if (hasEffect('freeze')) {
+        // feature T9: little ice crystals sprouting on the frozen head
+        g.fillStyle = '#eafaff';
+        g.strokeStyle = '#7de3ff';
+        g.lineWidth = 1;
+        for (let k = 0; k < 3; k++) {
+          const ang = -Math.PI / 2 + (k - 1) * 0.7;
+          const cr = CELL * 0.14;
+          const cxx = x + CELL / 2 + Math.cos(ang) * CELL * 0.28;
+          const cyy = y + CELL / 2 + Math.sin(ang) * CELL * 0.28;
+          g.beginPath();
+          g.moveTo(cxx, cyy - cr);
+          g.lineTo(cxx + cr * 0.5, cyy);
+          g.lineTo(cxx, cyy + cr);
+          g.lineTo(cxx - cr * 0.5, cyy);
+          g.closePath();
+          g.fill();
+          g.stroke();
+        }
+      }
     }
     g.restore();
   }

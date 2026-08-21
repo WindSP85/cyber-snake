@@ -682,6 +682,77 @@
       nf.frequency.exponentialRampToValueAtTime(200, t + 0.38);
       const ng = mkGain(t, 0.22, 0.38);
       n.connect(nf); nf.connect(ng); ng.connect(sfxBus); reg(n, [nf, ng]);
+    },
+
+    /* feature T9: sharp short laser shot (hunter turret / sys admin) */
+    shoot: function (t) {
+      const o = mkOsc('sawtooth', 1500, t, t + 0.12);
+      o.frequency.exponentialRampToValueAtTime(280, t + 0.1);
+      const f = mkFilter('highpass', 420, t);
+      const g = mkGain(t, 0.26, 0.11);
+      o.connect(f); f.connect(g); g.connect(sfxBus); reg(o, [f, g]);
+      const n = mkNoise(t, t + 0.07);
+      const nf = mkFilter('bandpass', 3200, t, 2);
+      const ng = mkGain(t, 0.14, 0.06);
+      n.connect(nf); nf.connect(ng); ng.connect(sfxBus); reg(n, [nf, ng]);
+    },
+
+    /* feature T9: icy descending whistle + crystal crackle */
+    freeze: function (t) {
+      const o = mkOsc('sine', 1900, t, t + 0.55);
+      o.frequency.exponentialRampToValueAtTime(240, t + 0.5);
+      const g = mkGain(t, 0.24, 0.5, 0.012);
+      o.connect(g); g.connect(sfxBus); reg(o, [g]);
+      const o2 = mkOsc('triangle', 2600, t, t + 0.5);
+      o2.frequency.exponentialRampToValueAtTime(500, t + 0.48);
+      const g2 = mkGain(t, 0.06, 0.46, 0.012);
+      o2.connect(g2); g2.connect(sfxBus); reg(o2, [g2]);
+      /* the crackle: a few tight highpassed noise ticks */
+      [0.05, 0.13, 0.23, 0.34, 0.45].forEach(function (off) {
+        const tt = t + off;
+        const n = mkNoise(tt, tt + 0.045);
+        const f = mkFilter('highpass', 4200, tt);
+        const ng = mkGain(tt, 0.16, 0.04);
+        n.connect(f); f.connect(ng); ng.connect(sfxBus); reg(n, [f, ng]);
+      });
+    },
+
+    /* feature T9: low gulp — sine drop with vibrato (the devourer) */
+    gulp: function (t) {
+      const o = mkOsc('sine', 210, t, t + 0.34);
+      o.frequency.exponentialRampToValueAtTime(52, t + 0.3);
+      const lfo = mkOsc('sine', 27, t, t + 0.34);
+      const depth = ctx.createGain();
+      depth.gain.value = 24;
+      lfo.connect(depth); depth.connect(o.frequency);
+      const g = mkGain(t, 0.42, 0.32, 0.014);
+      o.connect(g); g.connect(sfxBus);
+      reg(o, [g]); reg(lfo, [depth]);
+    },
+
+    /* feature T9: electric cut — saw + noise zap, 0.15 s */
+    cut: function (t) {
+      const o = mkOsc('sawtooth', 2600, t, t + 0.15);
+      o.frequency.exponentialRampToValueAtTime(380, t + 0.13);
+      const g = mkGain(t, 0.3, 0.14);
+      o.connect(g); g.connect(sfxBus); reg(o, [g]);
+      const n = mkNoise(t, t + 0.15);
+      const f = mkFilter('highpass', 1900, t);
+      const ng = mkGain(t, 0.26, 0.13);
+      n.connect(f); f.connect(ng); ng.connect(sfxBus); reg(n, [f, ng]);
+    },
+
+    /* feature T9: drone buzz — square with an LFO, 0.4 s */
+    drone: function (t) {
+      const o = mkOsc('square', 130, t, t + 0.4);
+      const lfo = mkOsc('sine', 17, t, t + 0.4);
+      const depth = ctx.createGain();
+      depth.gain.value = 42;
+      lfo.connect(depth); depth.connect(o.frequency);
+      const f = mkFilter('lowpass', 1300, t, 2);
+      const g = mkGain(t, 0.15, 0.38, 0.02);
+      o.connect(f); f.connect(g); g.connect(sfxBus);
+      reg(o, [f, g]); reg(lfo, [depth]);
     }
   };
 
