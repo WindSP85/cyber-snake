@@ -236,6 +236,17 @@
     }
   }
 
+  /* feature T19: an upgrade value from CS.Upg (js/upgrades.js);
+     the neutral fallback keeps the game playable even when the
+     module is somehow missing */
+  function upgVal(id, fallback) {
+    if (CS.Upg && typeof CS.Upg.val === 'function') {
+      const v = CS.Upg.val(id);
+      if (Number.isFinite(v)) return v;
+    }
+    return fallback;
+  }
+
   /* feature T17: every segment color comes from the active skin
      (js/skins.js); the death / respawn / split / bank bursts and
      drawSegment all reuse this single path */
@@ -321,6 +332,9 @@
     let d = EFFECT_DUR[type];
     if (typeof dur === 'number' && Number.isFinite(dur) && dur > 0) d = dur;
     if (!d) return;
+    // feature T19: the 'duration' upgrade stretches every timed effect
+    // but the boss freeze (the cryogen brings its own timer)
+    if (type !== 'freeze') d *= upgVal('duration', 1);
     for (let i = 0; i < effects.length; i++) {
       if (effects[i].type === type) {
         effects[i].timer = d; // refresh an already running effect
@@ -435,6 +449,13 @@
     return true;
   }
 
+  /* feature T19: the 'luck' upgrade shortens the spawn interval
+     (x0.8 per bought level: 1 / .8 / .64 / .512) */
+  function pickupInterval() {
+    return (PICKUP_MIN + Math.random() * (PICKUP_MAX - PICKUP_MIN)) *
+      upgVal('luck', 1);
+  }
+
   /* lifetimes tick down; the spawn timer holds while the field is full
      or a boss intro is playing (no pickups during the intro) */
   function updatePickups(dt) {
@@ -447,7 +468,7 @@
     if (pickups.length >= PICKUP_MAX_FIELD) return;
     if (fight && fight.active && fight.phase === 'intro') return;
     if (spawnPickup()) {
-      pickupTimer = PICKUP_MIN + Math.random() * (PICKUP_MAX - PICKUP_MIN);
+      pickupTimer = pickupInterval(); // feature T19: the luck multiplier
     } else {
       pickupTimer = 1; // the field was too crowded: retry in a second
     }
@@ -727,6 +748,11 @@
     CS.UI.banner(null, false);
     CS.UI.show('gameover');
     offerScoreSave(); // feature T10: top-10 name save
+    // feature T19: bank floor(score/100) data chips for the shop
+    const earned = (CS.Upg && typeof CS.Upg.earnRun === 'function')
+      ? CS.Upg.earnRun(score)
+      : 0;
+    if (earned > 0) CS.UI.toast(tr('chipsEarn', earned));
   }
 
   /* ---------- feature T10: leaderboard save (SPEC §13) ---------- */
@@ -834,18 +860,24 @@
     }
   }
 
+  /* feature T19: the base radius plus the bought 'magnet' bonus */
+  function magnetRadius() {
+    return MAGNET_RADIUS + upgVal('magnet', 0);
+  }
+
   /* feature T8: every tick the magnet vacuums food / bonus / boss
-     charges within MAGNET_RADIUS (manhattan) of the head */
+     charges within the magnet radius (manhattan) of the head */
   function magnetCollect() {
     if (!hasEffect('magnet') || !snake.length) return;
     const head = snake[0].curr;
-    if (food && manhattan(food, head) <= MAGNET_RADIUS) eatFoodAt(food.x, food.y);
-    if (bonus && manhattan(bonus, head) <= MAGNET_RADIUS) eatBonusAt(bonus.x, bonus.y);
+    const r = magnetRadius();
+    if (food && manhattan(food, head) <= r) eatFoodAt(food.x, food.y);
+    if (bonus && manhattan(bonus, head) <= r) eatBonusAt(bonus.x, bonus.y);
     if (fight && fight.active) {
       const charges = fight.chargeCells();
       if (charges) {
         for (let i = 0; i < charges.length; i++) {
-          if (manhattan(charges[i], head) <= MAGNET_RADIUS) {
+          if (manhattan(charges[i], head) <= r) {
             collectChargeAt(charges[i].x, charges[i].y);
           }
         }
@@ -1219,10 +1251,10 @@
     escaped = [];      // feature T11
     bank = null;       // feature T11
     scheduleBankTimer();
-    lives = 0;
+    lives = upgVal('life', 0); // feature T19: bought start lives (0..3)
     respawnTimer = 0;
     invulnTimer = 0;
-    pickupTimer = PICKUP_MIN + Math.random() * (PICKUP_MAX - PICKUP_MIN);
+    pickupTimer = pickupInterval();
     applySpeed();
     updateLivesHud();
     renderEffectsHud();

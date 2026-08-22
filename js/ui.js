@@ -7,7 +7,7 @@
 
   const CS = window.CS = window.CS || {};
 
-  const SCREENS = ['lang', 'menu', 'controls', 'board', 'ach', 'skins', 'pause', 'gameover'];
+  const SCREENS = ['lang', 'menu', 'controls', 'board', 'ach', 'skins', 'upg', 'pause', 'gameover'];
   const TOAST_MS = 1600;
   const CLEAR_CONFIRM_MS = 3000; // feature T10: "Sure?" arming window
   const HANDLER_KEYS = ['start', 'resume', 'restart', 'menu', 'mute', 'lang', 'save'];
@@ -47,6 +47,7 @@
     if (name === 'board') renderBoard(); // feature T10: fresh rows on every show
     if (name === 'ach') renderAch(); // feature T16: fresh cards on every show
     if (name === 'skins') renderSkins(); // feature T17: fresh swatches on every show
+    if (name === 'upg') renderUpg(); // feature T19: fresh cards on every show
   }
 
   function fire(name) {
@@ -275,6 +276,64 @@
     }
   }
 
+  /* ---------- feature T19: upgrades screen (SPEC §19) ---------- */
+
+  /* rebuild the #upg-grid cards: name, description, level pips
+     (◾◾◽), the next-level price (or MAX) and the BUY button.
+     The button dims and shows the current chip balance while the
+     next level cannot be paid for; a successful buy plays 'levelup'
+     and re-renders (a refused one just re-renders — the global
+     button handler has already played 'click') */
+  function renderUpg() {
+    const grid = byId('upg-grid');
+    if (!grid) return;
+    const upg = CS.Upg || {};
+    const list = typeof upg.list === 'function' ? upg.list() : [];
+    const balance = typeof upg.chips === 'function' ? upg.chips() : 0;
+    setText('upg-chips', t('upgChips', balance));
+    grid.innerHTML = '';
+    for (let i = 0; i < list.length; i++) {
+      const u = list[i];
+      const maxed = u.cost === null;
+      const card = document.createElement('div');
+      card.className = 'upg-card' + (maxed ? ' maxed' : '');
+      const name = document.createElement('span');
+      name.className = 'upg-name';
+      name.textContent = t(u.nameKey);
+      const desc = document.createElement('span');
+      desc.className = 'upg-desc';
+      desc.textContent = t(u.descKey);
+      const meta = document.createElement('span');
+      meta.className = 'upg-meta';
+      const lvl = document.createElement('span');
+      lvl.className = 'upg-level';
+      lvl.textContent = new Array(u.level + 1).join('◾') +
+        new Array(4 - u.level).join('◽');
+      const cost = document.createElement('span');
+      cost.className = 'upg-cost' + (maxed ? ' max' : '');
+      cost.textContent = maxed ? t('upgMax') : t('upgChips', u.cost);
+      meta.appendChild(lvl);
+      meta.appendChild(cost);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-small upg-buy' +
+        (u.affordable ? '' : ' dim');
+      btn.textContent = maxed ? t('upgMax')
+        : (u.affordable ? t('upgBuy') : t('upgChips', balance));
+      btn.addEventListener('click', function () {
+        if (typeof upg.buy === 'function' && upg.buy(u.id)) {
+          CS.Audio.sfx('levelup'); // the purchase fanfare
+        }
+        renderUpg(); // fresh pips, prices and the balance
+      });
+      card.appendChild(name);
+      card.appendChild(desc);
+      card.appendChild(meta);
+      card.appendChild(btn);
+      grid.appendChild(card);
+    }
+  }
+
   /* the gameover name-save block — game.js decides when it shows */
   function hideScoreSave() {
     const el = byId('score-save');
@@ -410,6 +469,13 @@
       showScreen('skins');
     });
     bind('btn-skins-back', function () {
+      showScreen('menu');
+    });
+    // feature T19: upgrades screen (menu button + back)
+    bind('btn-upg', function () {
+      showScreen('upg');
+    });
+    bind('btn-upg-back', function () {
       showScreen('menu');
     });
     bind('mute-btn', function () {

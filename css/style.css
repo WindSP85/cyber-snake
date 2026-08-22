@@ -1496,3 +1496,117 @@ body.in-telegram .tg-only {
     max-width: 320px;
   }
 }
+
+/* ============================================================
+   Feature T19: meta-progression — upgrades screen + chips toast
+   ============================================================ */
+
+/* the "+N CHIPS" toast fires together with the gameover screen and
+   must stay readable above the overlays (screens: z-index 10,
+   portrait screens: z-index 50) */
+.toast {
+  z-index: 55;
+}
+
+/* "◈ N" chip balance under the upgrades screen title */
+.upg-chips {
+  margin: -8px 0 16px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: var(--yellow);
+  text-shadow: 0 0 10px rgba(255, 230, 0, .5);
+}
+
+/* 2x2 upgrade cards: name / description / pips + price / buy */
+.upg-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 auto 22px;
+  max-width: 620px;
+  text-align: left;
+}
+
+.upg-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: rgba(4, 5, 12, .55);
+  border: 1px solid rgba(0, 240, 255, .3);
+}
+
+/* a fully bought upgrade gets the green "done" frame */
+.upg-card.maxed {
+  border-color: rgba(0, 255, 157, .45);
+}
+
+.upg-name {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #eafcff;
+}
+
+.upg-desc {
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(215, 247, 255, .5);
+}
+
+/* the level pips (◾◾◽) and the next-level price share one row */
+.upg-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.upg-level {
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: var(--cyan);
+}
+
+.upg-cost {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--yellow);
+  text-shadow: 0 0 8px rgba(255, 230, 0, .4);
+}
+
+.upg-cost.max {
+  color: var(--green);
+  text-shadow: 0 0 8px rgba(0, 255, 157, .4);
+}
+
+.upg-buy {
+  margin-top: 4px;
+}
+
+/* the buy button: dimmed while the next level cannot be paid for
+   (it then shows the chip balance) or the upgrade is maxed */
+.btn.upg-buy.dim {
+  color: rgba(215, 247, 255, .4);
+  border-color: rgba(0, 240, 255, .25);
+  background: rgba(0, 240, 255, .02);
+  text-shadow: none;
+  box-shadow: none;
+  cursor: default;
+}
+
+.btn.upg-buy.dim:hover,
+.btn.upg-buy.dim:focus-visible {
+  background: rgba(0, 240, 255, .02);
+  box-shadow: none;
+  outline: none;
+}
+
+@media (max-width: 640px) {
+  .upg-grid {
+    grid-template-columns: 1fr;
+    max-width: 340px;
+  }
+}

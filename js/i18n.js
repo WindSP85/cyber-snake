@@ -149,7 +149,22 @@
       skinCondMagma: 'Набери 2500 очков',
       skinCondGold: 'Сдай 8+ сегментов за раз',
       skinCondRainbow: 'Повергни 5 боссов',
-      skinCondGhost: 'Открой 10 тайн'
+      skinCondGhost: 'Открой 10 тайн',
+      /* feature T19: meta-progression upgrades (SPEC §19) */
+      upg: 'Апгрейды',
+      upgTitle: 'АПГРЕЙДЫ',
+      upgChips: '◈ {1}',
+      upgBuy: 'Купить',
+      upgMax: 'МАКС',
+      upgLife: 'Жизнь',
+      upgMagnet: 'Магнит',
+      upgDuration: 'Длительность',
+      upgLuck: 'Удача',
+      upgLifeD: 'Старт +1 жизнь за уровень',
+      upgMagnetD: 'Радиус магнита +1 за уровень',
+      upgDurationD: 'Эффекты дольше +40% за уровень',
+      upgLuckD: 'Пикапы чаще: интервал спавна −20% за уровень',
+      chipsEarn: '+{1} ЧИПОВ ДАННЫХ'
     },
     en: {
       langTitle: 'SELECT LANGUAGE',
@@ -285,7 +300,22 @@
       skinCondMagma: 'Score 2500 points',
       skinCondGold: 'Bank 8+ segments at once',
       skinCondRainbow: 'Defeat 5 bosses',
-      skinCondGhost: 'Open 10 mysteries'
+      skinCondGhost: 'Open 10 mysteries',
+      /* feature T19: meta-progression upgrades (SPEC §19) */
+      upg: 'Upgrades',
+      upgTitle: 'UPGRADES',
+      upgChips: '◈ {1}',
+      upgBuy: 'Buy',
+      upgMax: 'MAX',
+      upgLife: 'Life',
+      upgMagnet: 'Magnet',
+      upgDuration: 'Duration',
+      upgLuck: 'Luck',
+      upgLifeD: '+1 start life per level',
+      upgMagnetD: 'Magnet radius +1 per level',
+      upgDurationD: 'Effects last +40% longer per level',
+      upgLuckD: 'Pickups more often: spawn interval −20% per level',
+      chipsEarn: '+{1} DATA CHIPS'
     }
   };
 

@@ -62,6 +62,7 @@
           <button id="btn-board" class="btn" type="button" data-i18n="board">Лидеры</button>
           <button id="btn-ach" class="btn" type="button" data-i18n="ach">Достижения</button>
           <button id="btn-skins" class="btn" type="button" data-i18n="skins">Скины</button>
+          <button id="btn-upg" class="btn" type="button" data-i18n="upg">Апгрейды</button>
           <button id="btn-lang" class="btn" type="button" title="Language">🌐</button>
         </div>
         <p class="hint" data-i18n="hintMenu">Enter — старт · M — звук</p>
@@ -151,6 +152,17 @@
       </div>
     </div>
 
+    <!-- Screen: upgrades (feature T19) -->
+    <div id="screen-upg" class="screen hidden">
+      <div class="panel">
+        <h2 class="screen-title" data-i18n="upgTitle">АПГРЕЙДЫ</h2>
+        <!-- the chip balance header; the cards are (re)built by ui.js renderUpg() -->
+        <p id="upg-chips" class="upg-chips"></p>
+        <div id="upg-grid" class="upg-grid"></div>
+        <button id="btn-upg-back" class="btn" type="button" data-i18n="back">Назад</button>
+      </div>
+    </div>
+
     <!-- Screen: pause -->
     <div id="screen-pause" class="screen hidden">
       <div class="panel">
@@ -235,6 +247,8 @@
   <script src="js/achievements.js"></script>
   <!-- feature T17: skins (SPEC §17) — after achievements, before ui -->
   <script src="js/skins.js"></script>
+  <!-- feature T19: meta-progression upgrades (SPEC §19) — after skins, before ui -->
+  <script src="js/upgrades.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/game.js"></script>
 </body>
