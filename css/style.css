@@ -1237,3 +1237,18 @@ body::before {
     margin: 8px 0;
   }
 }
+
+/* ============================================================
+   Feature T15: Telegram Mini App integration (CS.TG, SPEC §15)
+   ============================================================ */
+
+/* Telegram-only elements (the gameover 📤 share button) stay hidden
+   everywhere else; CS.TG.init() tags <body> with 'in-telegram'
+   when window.Telegram is present */
+.tg-only {
+  display: none;
+}
+
+body.in-telegram .tg-only {
+  display: inline-block;
+}

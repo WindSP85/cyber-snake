@@ -455,6 +455,7 @@
   function applyPickup(p) {
     const px = p.x * CELL + CELL / 2;
     const py = p.y * CELL + CELL / 2;
+    CS.TG.haptic('click'); // feature T15: every pickup ticks
     if (p.type === 'virus') {
       penalizeScore(VIRUS_PENALTY);
       CS.FX.glitch(0.3);
@@ -606,6 +607,7 @@
   function onBossDefeated() {
     const idx = fight ? fight.bossIndex : 1;
     addScore(BOSS_SCORE * idx);
+    CS.TG.haptic('success'); // feature T15: victory pulse
     if (fight) {
       // farewell burst at the boss core (2x2 block center)
       CS.FX.burst((fight.x + 1) * CELL, (fight.y + 1) * CELL, '#ff2d55', 40);
@@ -630,6 +632,7 @@
 
   function die() {
     if (state === 'dying' || state === 'gameover' || state === 'respawning') return;
+    CS.TG.haptic('error'); // feature T15: the death buzz
     if (lives > 0) { // feature T8: a spare life reboots the snake
       startRespawn();
       return;
@@ -797,6 +800,7 @@
     eaten++;
     growth += 1;
     CS.Audio.sfx('eat');
+    CS.TG.haptic('click'); // feature T15
     CS.FX.burst(x * CELL + CELL / 2, y * CELL + CELL / 2, '#ff2bd6', 7);
     food = null;
     spawnFood();
@@ -807,6 +811,7 @@
   function eatBonusAt(x, y) {
     addScore(BONUS_SCORE);
     growth += BONUS_GROW;
+    CS.TG.haptic('click'); // feature T15
     CS.FX.burst(x * CELL + CELL / 2, y * CELL + CELL / 2, '#ffe600', 14);
     bonus = null;
     CS.Audio.sfx('bonus');
@@ -815,6 +820,7 @@
   function collectChargeAt(x, y) {
     if (!fight || !fight.active) return;
     if (!fight.collectCharge(x, y)) return;
+    CS.TG.haptic('click'); // feature T15: the boss took a hit
     CS.FX.burst(x * CELL + CELL / 2, y * CELL + CELL / 2, '#00ff9d', 10);
     CS.FX.shake(4);
     addScore(CHARGE_SCORE); // the fight may be over now (onDefeated ran)
@@ -869,6 +875,7 @@
     const kind = forced || rollMystery();
     if (kind === 'jackpot') {
       addScore(MYSTERY_JACKPOT);
+      CS.TG.haptic('heavy'); // feature T15: the jackpot slams
       CS.UI.toast(tr('mJackpot'));
     } else if (kind === 'double') {
       addEffect('double');
@@ -2011,15 +2018,9 @@
     if (running) return;
     running = true;
 
-    // Telegram Mini App: сообщить о готовности и занять весь экран
-    // (вне Telegram window.Telegram отсутствует — безопасно игнорируется)
-    try {
-      const wa = window.Telegram && window.Telegram.WebApp;
-      if (wa && typeof wa.ready === 'function') wa.ready();
-      if (wa && typeof wa.expand === 'function') wa.expand();
-    } catch (e) {
-      /* not inside Telegram */
-    }
+    // feature T15: Telegram Mini App bootstrap (ready + expand + the
+    // 'in-telegram' body tag) lives in CS.TG; outside Telegram no-op
+    CS.TG.init();
 
     canvas = document.getElementById('game-canvas');
     if (canvas) {
@@ -2059,6 +2060,14 @@
     // #btn-pause is not part of the CS.UI.on contract — wire it directly
     const pauseBtn = document.getElementById('btn-pause');
     if (pauseBtn) pauseBtn.addEventListener('click', togglePauseButton);
+
+    // feature T15: the gameover 📤 share button (Telegram only, .tg-only)
+    const shareBtn = document.getElementById('btn-share');
+    if (shareBtn) {
+      shareBtn.addEventListener('click', function () {
+        CS.TG.shareScore(score);
+      });
+    }
 
     // feature T10: Enter inside the name field saves the score and must
     // not leak to the global Enter restart

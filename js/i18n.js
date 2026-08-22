@@ -100,7 +100,10 @@
       colName: 'ИМЯ',
       colScore: 'СЧЁТ',
       colLvl: 'УР.',
-      colDate: 'ДАТА'
+      colDate: 'ДАТА',
+      /* feature T15: Telegram share (SPEC §15) */
+      share: 'Поделиться',
+      shareText: 'Мой рекорд в NEON://SNAKE: {1} 🐍 Побьёшь?'
     },
     en: {
       langTitle: 'SELECT LANGUAGE',
@@ -187,7 +190,10 @@
       colName: 'NAME',
       colScore: 'SCORE',
       colLvl: 'LVL',
-      colDate: 'DATE'
+      colDate: 'DATE',
+      /* feature T15: Telegram share (SPEC §15) */
+      share: 'Share',
+      shareText: 'My NEON://SNAKE score: {1} 🐍 Beat it!'
     }
   };
 
