@@ -1,5 +1,6 @@
 /* ============================================================
-   NEON://SNAKE — leaderboard (feature T10, SPEC §13; T14: global)
+   NEON://SNAKE — leaderboard (feature T10, SPEC §13; T14: global;
+   T20: seasonal global mode)
    CS.Leaderboard: local top-10 high scores + optional Supabase.
 
    ARCHITECTURE NOTE: the provider seam below (providerRead /
@@ -10,6 +11,11 @@
    degrades gracefully: no CS.Config credentials → no network at
    all (file://-safe), a failed request → null / false, never an
    exception.
+
+   feature T20: every global read/write carries season = the local
+   'YYYY-MM' month. Reads filter season=eq.<month>; until the cloud
+   column exists an empty/failed filtered answer triggers ONE retry
+   without the filter (legacy rows) — never an exception.
    ============================================================ */
 (function () {
   'use strict';
@@ -79,6 +85,14 @@
     const dd = String(d.getDate()).padStart(2, '0');
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     return dd + '.' + mm + '.' + d.getFullYear();
+  }
+
+  /* feature T20: the current season — the local 'YYYY-MM' month;
+     every global read/write is scoped to it (SPEC §20 autorreset) */
+  function seasonKey() {
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    return d.getFullYear() + '-' + mm;
   }
 
   function positive(score) {
@@ -187,33 +201,55 @@
     }
   }
 
-  /* async global top-10; callback(rows | null), never throws */
+  /* feature T20: one GET of the scores table; onRows(entries) — the
+     array may be empty, null = the request/parse failed */
+  function fetchQuery(url, onRows) {
+    netFetch(
+      url,
+      { method: 'GET', headers: netHeaders() },
+      function (res) {
+        if (!res || !res.ok || typeof res.json !== 'function') {
+          onRows(null);
+          return;
+        }
+        try {
+          res.json().then(function (rows) {
+            onRows(normalizeRemote(rows));
+          }, function () {
+            onRows(null);
+          });
+        } catch (e) {
+          onRows(null);
+        }
+      },
+      function () {
+        onRows(null);
+      }
+    );
+  }
+
+  /* async global top-10 of the CURRENT season; callback(rows | null),
+     never throws. feature T20: the GET filters season=eq.<month>;
+     until the cloud column exists (the owner's ALTER) the filtered
+     query answers empty or errors — then ONE retry without the
+     filter serves the legacy rows; both empty → null → the caller
+     falls back to the local board */
   function fetchRemote(callback) {
     const done = typeof callback === 'function' ? callback : function () {};
     if (!isGlobal()) {
       done(null); // local mode: no network at all
       return;
     }
-    netFetch(
-      endpoint('/rest/v1/scores?select=name,score,level,created_at&order=score.desc&limit=10'),
-      { method: 'GET', headers: netHeaders() },
-      function (res) {
-        if (!res || !res.ok || typeof res.json !== 'function') return done(null);
-        try {
-          res.json().then(function (rows) {
-            const entries = normalizeRemote(rows);
-            done(entries.length ? entries : null); // empty payload → local fallback
-          }, function () {
-            done(null);
-          });
-        } catch (e) {
-          done(null);
-        }
-      },
-      function () {
-        done(null);
+    const path = '/rest/v1/scores?select=name,score,level,created_at&order=score.desc&limit=10';
+    fetchQuery(endpoint(path + '&season=eq.' + seasonKey()), function (rows) {
+      if (rows && rows.length) {
+        done(rows);
+        return;
       }
-    );
+      fetchQuery(endpoint(path), function (all) {
+        done(all && all.length ? all : null);
+      });
+    });
   }
 
   /* async push of one entry; callback(ok bool), silent failure */
@@ -241,7 +277,8 @@
         body: JSON.stringify({
           name: name,
           score: positive(score) ? Math.floor(score) : 0,
-          level: Number.isFinite(level) && level > 0 ? Math.floor(level) : 1
+          level: Number.isFinite(level) && level > 0 ? Math.floor(level) : 1,
+          season: seasonKey() // feature T20: the row joins the current season
         })
       },
       function (res) {
@@ -259,6 +296,11 @@
     /* feature T14: true when Supabase credentials are configured */
     isGlobal: function () {
       return isGlobal();
+    },
+
+    /* feature T20: the current season key 'YYYY-MM' (local month) */
+    season: function () {
+      return seasonKey();
     },
 
     /* → [{name, score, level, date}], sorted by score desc, max 10 */

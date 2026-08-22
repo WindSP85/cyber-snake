@@ -1,5 +1,5 @@
 /* ============================================================
-   NEON://SNAKE — game orchestrator (SPEC §2, §3, §4, §7, §11–§14)
+   NEON://SNAKE — game orchestrator (SPEC §2, §3, §4, §7, §11–§14, §20)
    CS.Game owns the state machine, the snake core, food/bonus,
    pickups, mystery containers and the tail bank, levels & speed,
    boss integration, the death sequence, input (keyboard + touch),
@@ -93,6 +93,15 @@
   const BANK_KEEP = 4;              // segments kept after the conversion
   const BANK_SEGMENT_SCORE = 15;    // x level per converted segment
   const BANK_INTEREST = 50;         // flat payout at length <= 4
+
+  /* feature T20: daily challenge modifiers (SPEC §20) — the day pick
+     and the active flag live in CS.Daily (js/daily.js); these are the
+     tuning numbers applied at each decision point below */
+  const DAILY_ICE_SPEED = 0.6;      // 'ice': whole-run tick multiplier
+  const DAILY_CREAM_SCORE = 2;      // 'cream': food score multiplier
+  const DAILY_CREAM_GROW = 2;       // 'cream': growth per food (base 1)
+  const DAILY_DARK_R0 = 4;          // 'dark': fully visible radius, cells
+  const DAILY_DARK_R1 = 7;          // 'dark': almost black by here, cells
 
   /* weighted pickup types (SPEC §14 weights); 'life' is excluded
      while lives are full */
@@ -245,6 +254,13 @@
       if (Number.isFinite(v)) return v;
     }
     return fallback;
+  }
+
+  /* feature T20: true while the live run carries the given daily
+     modifier — CS.Daily owns the flag, startGame() sets it */
+  function dailyOn(id) {
+    return !!(CS.Daily && typeof CS.Daily.active === 'function' &&
+      CS.Daily.active() === id);
   }
 
   /* feature T17: every segment color comes from the active skin
@@ -430,8 +446,14 @@
     for (let i = 0; i < PICKUP_TYPES.length; i++) {
       const p = PICKUP_TYPES[i];
       if (p.type === 'life' && lives >= MAX_LIVES) continue;
-      pool.push(p);
-      total += p.weight;
+      let w = p.weight;
+      // feature T20: the daily 'hunt' doubles the mystery and virus
+      // weights — more containers, meaner viruses
+      if (dailyOn('hunt') && (p.type === 'mystery' || p.type === 'virus')) {
+        w *= 2;
+      }
+      pool.push({ type: p.type, weight: w });
+      total += w;
     }
     let roll = Math.random() * total;
     for (let i = 0; i < pool.length; i++) {
@@ -517,6 +539,8 @@
     if (hasEffect('freeze')) tps *= FREEZE_FACTOR;
     // feature T11: the mystery turbo multiplies on top of everything
     if (hasEffect('turbo')) tps *= TURBO_SPEED;
+    // feature T20: the daily 'ice' slows the entire run
+    if (dailyOn('ice')) tps *= DAILY_ICE_SPEED;
     stepInterval = 1 / tps;
   }
 
@@ -753,6 +777,16 @@
       ? CS.Upg.earnRun(score)
       : 0;
     if (earned > 0) CS.UI.toast(tr('chipsEarn', earned));
+    // feature T20: the day challenge is over — keep the day best and
+    // announce the record (the toast lands after the chips one on
+    // purpose: the day record is the headline of a challenge run)
+    if (CS.Daily.active()) {
+      if (score > CS.Daily.best()) {
+        CS.Daily.setBest(score);
+        CS.UI.toast(tr('dailyRecord', score));
+      }
+      CS.Daily.stop();
+    }
   }
 
   /* ---------- feature T10: leaderboard save (SPEC §13) ---------- */
@@ -826,10 +860,12 @@
   /* ---------- shared pickup code (also used by the T8 magnet) ---------- */
 
   function eatFoodAt(x, y) {
-    addScore(FOOD_SCORE * level);
+    // feature T20: the daily 'cream' doubles the food payout
+    addScore(FOOD_SCORE * level * (dailyOn('cream') ? DAILY_CREAM_SCORE : 1));
     CS.Ach.event('meal'); // feature T16
     eaten++;
-    growth += 1;
+    // feature T20: 'cream' grows the snake twice as fast
+    growth += dailyOn('cream') ? DAILY_CREAM_GROW : 1;
     CS.Audio.sfx('eat');
     CS.TG.haptic('click'); // feature T15
     CS.FX.burst(x * CELL + CELL / 2, y * CELL + CELL / 2, '#ff2bd6', 7);
@@ -1222,7 +1258,13 @@
 
   /* ---------- state transitions ---------- */
 
-  function startGame() {
+  function startGame(opts) {
+    // feature T20: {daily:true} runs the day challenge — the modifier
+    // flag lives in CS.Daily from here until the run ends (death or
+    // leaving to the menu); every other start is a normal run
+    const daily = !!(opts && opts.daily);
+    if (daily) CS.Daily.start();
+    else CS.Daily.stop();
     applyGridChange(); // feature T13: the field follows the current screen
     hideScoreSave();   // feature T10: a fresh run drops the save block
     CS.Ach.resetRun(); // feature T16: per-run achievement counters
@@ -1264,6 +1306,8 @@
     CS.UI.banner(null, false);
     CS.UI.show('game');
     CS.UI.toast(tr('toastConnect'));
+    // feature T20: announce the day modifier (overrules the toast)
+    if (daily) CS.UI.toast(tr(CS.Daily.today().descKey));
     spawnFood();
     CS.Audio.ensure();
     CS.Audio.sfx('start');
@@ -1296,6 +1340,7 @@
     debris = [];       // feature T9
     escaped = [];      // feature T11
     bank = null;       // feature T11
+    CS.Daily.stop();   // feature T20: leaving the field ends the challenge
     invulnTimer = 0;
     applySpeed();      // drop surge/slow multipliers from stepInterval
     renderEffectsHud();
@@ -1303,6 +1348,7 @@
     CS.UI.banner(null, false);
     CS.UI.hud({ best: best });
     CS.UI.show('menu');
+    updateDailyLine(); // feature T20: the modifier name / day best may have changed
     CS.Audio.music('menu');
   }
 
@@ -1372,6 +1418,17 @@
     return !!el && !el.classList.contains('hidden');
   }
 
+  /* feature T20: "ЧЕЛЛЕНДЖ ДНЯ: <название> · Сегодня: N" under the
+     menu buttons — rebuilt on every menu visit, language switch and
+     after a challenge run (the day best may have moved) */
+  function updateDailyLine() {
+    const el = document.getElementById('daily-line');
+    if (!el || !CS.Daily || typeof CS.Daily.today !== 'function') return;
+    const info = CS.Daily.today();
+    el.textContent = tr('daily').toUpperCase() + ': ' + tr(info.nameKey) +
+      ' · ' + tr('dailyBest', CS.Daily.best());
+  }
+
   /* ---------- input ---------- */
 
   function firstGesture() {
@@ -1385,8 +1442,10 @@
     if (state !== 'playing' && state !== 'boss') return;
     // feature T11: 'reverse' inverts the incoming vector only — the
     // buffer rules, the reversal ban and the magnet autopilot are
-    // untouched (the magnet is not a direction)
-    if (hasEffect('reverse')) d = { x: -d.x, y: -d.y };
+    // untouched (the magnet is not a direction); feature T20: the
+    // daily 'mirror' holds the same inversion for the whole run (both
+    // at once simply cancel out)
+    if (hasEffect('reverse') !== dailyOn('mirror')) d = { x: -d.x, y: -d.y };
     const last = dirQueue.length ? dirQueue[dirQueue.length - 1] : dir;
     if (d.x === last.x && d.y === last.y) return;      // repeat
     if (d.x === -last.x && d.y === -last.y) return;    // 180-degree reversal
@@ -1583,8 +1642,34 @@
       if (fight && fight.active) fight.draw(g, CELL); // draws its charges itself
       drawSnake();
     }
+    drawDarkMask(); // feature T20: the 'dark' vignette over the scene
     CS.FX.draw(g);
     drawDmgPops();
+  }
+
+  /* feature T20: the daily 'dark' modifier — a radial mask centered
+     on the interpolated head: fully transparent within DAILY_DARK_R0
+     cells, almost black by DAILY_DARK_R1; the canvas extends the last
+     color stop, so everything farther away stays dark. A missing head
+     (the respawn reboot) simply skips the mask for a moment. */
+  function drawDarkMask() {
+    if (!dailyOn('dark') || !snake.length) return;
+    const head = snake[0];
+    const t = (state === 'playing' || state === 'boss' || state === 'paused')
+      ? Math.min(1, stepTimer / stepInterval)
+      : 1; // dying / gameover: freeze at the current cells
+    const hx = (head.prev.x + (head.curr.x - head.prev.x) * t) * CELL + CELL / 2;
+    const hy = (head.prev.y + (head.curr.y - head.prev.y) * t) * CELL + CELL / 2;
+    const grad = g.createRadialGradient(
+      hx, hy, DAILY_DARK_R0 * CELL,
+      hx, hy, DAILY_DARK_R1 * CELL
+    );
+    grad.addColorStop(0, 'rgba(4,5,12,0)');
+    grad.addColorStop(1, 'rgba(4,5,12,0.96)');
+    g.save();
+    g.fillStyle = grad;
+    g.fillRect(0, 0, GRID_W * CELL, GRID_H * CELL);
+    g.restore();
   }
 
   function drawDmgPops() {
@@ -2107,6 +2192,16 @@
     const pauseBtn = document.getElementById('btn-pause');
     if (pauseBtn) pauseBtn.addEventListener('click', togglePauseButton);
 
+    // feature T20: the daily challenge button in the menu — a run
+    // under the day modifier (startGame hides the menu itself, the
+    // same way every other start does)
+    const dailyBtn = document.getElementById('btn-daily');
+    if (dailyBtn) {
+      dailyBtn.addEventListener('click', function () {
+        startGame({ daily: true });
+      });
+    }
+
     // feature T15: the gameover 📤 share button (Telegram only, .tg-only)
     const shareBtn = document.getElementById('btn-share');
     if (shareBtn) {
@@ -2131,10 +2226,12 @@
     if (CS.I18N && typeof CS.I18N.onChange === 'function') {
       CS.I18N.onChange(function () {
         updateMuteButton(CS.Audio.getMuted());
+        updateDailyLine(); // feature T20: the line is bilingual
       });
     }
 
     updateMuteButton(CS.Audio.getMuted());
+    updateDailyLine(); // feature T20: the day challenge line
     CS.UI.hud({ score: 0, best: best, level: 1 });
     CS.UI.show('lang'); // language selection on every entry (feature T7)
     state = 'menu';

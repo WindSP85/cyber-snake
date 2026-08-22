@@ -1610,3 +1610,19 @@ body.in-telegram .tg-only {
     max-width: 340px;
   }
 }
+
+/* ============================================================
+   Feature T20: daily challenge — menu line under the buttons
+   ============================================================ */
+
+/* "ЧЕЛЛЕНДЖ ДНЯ: <название> · Сегодня: N" — yellow like the score,
+   uppercase like the surrounding menu typography */
+.daily-line {
+  margin: 0 0 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--yellow);
+  text-shadow: 0 0 8px rgba(255, 230, 0, .35);
+}

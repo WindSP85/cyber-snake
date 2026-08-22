@@ -164,7 +164,22 @@
       upgMagnetD: 'Радиус магнита +1 за уровень',
       upgDurationD: 'Эффекты дольше +40% за уровень',
       upgLuckD: 'Пикапы чаще: интервал спавна −20% за уровень',
-      chipsEarn: '+{1} ЧИПОВ ДАННЫХ'
+      chipsEarn: '+{1} ЧИПОВ ДАННЫХ',
+      /* feature T20: daily challenge + seasons (SPEC §20) */
+      daily: 'Челлендж дня',
+      dailyBest: 'Сегодня: {1}',
+      dailyRecord: 'РЕКОРД ДНЯ: {1}',
+      dMirror: 'ЗЕРКАЛО',
+      dIce: 'ЛЁД',
+      dCream: 'СЛИВОК',
+      dDark: 'ТЕМНОТА',
+      dHunt: 'ОХОТА',
+      dMirrorD: 'управление наоборот',
+      dIceD: 'всё в замедлении',
+      dCreamD: 'еда ×2 очков, но рост вдвое',
+      dDarkD: 'видно только у головы',
+      dHuntD: 'тайны чаще, вирусы злее',
+      seasonBadge: 'СЕЗОН: {1}'
     },
     en: {
       langTitle: 'SELECT LANGUAGE',
@@ -315,7 +330,22 @@
       upgMagnetD: 'Magnet radius +1 per level',
       upgDurationD: 'Effects last +40% longer per level',
       upgLuckD: 'Pickups more often: spawn interval −20% per level',
-      chipsEarn: '+{1} DATA CHIPS'
+      chipsEarn: '+{1} DATA CHIPS',
+      /* feature T20: daily challenge + seasons (SPEC §20) */
+      daily: 'Daily challenge',
+      dailyBest: 'Today: {1}',
+      dailyRecord: 'DAY RECORD: {1}',
+      dMirror: 'MIRROR',
+      dIce: 'ICE',
+      dCream: 'CREAM',
+      dDark: 'DARKNESS',
+      dHunt: 'HUNT',
+      dMirrorD: 'controls reversed',
+      dIceD: 'everything slowed',
+      dCreamD: 'food ×2 points, double growth',
+      dDarkD: 'you only see near the head',
+      dHuntD: 'more mysteries, meaner viruses',
+      seasonBadge: 'SEASON: {1}'
     }
   };
 

@@ -58,6 +58,8 @@
         <p class="menu-best"><span data-i18n="bestLabel">Рекорд:</span> <span id="menu-best">0</span></p>
         <div class="menu-buttons">
           <button id="btn-start" class="btn btn-primary" type="button" data-i18n="play">Играть</button>
+          <!-- feature T20: the daily challenge run (its own modifier) -->
+          <button id="btn-daily" class="btn" type="button" data-i18n="daily">Челлендж дня</button>
           <button id="btn-controls" class="btn" type="button" data-i18n="controls">Управление</button>
           <button id="btn-board" class="btn" type="button" data-i18n="board">Лидеры</button>
           <button id="btn-ach" class="btn" type="button" data-i18n="ach">Достижения</button>
@@ -65,6 +67,8 @@
           <button id="btn-upg" class="btn" type="button" data-i18n="upg">Апгрейды</button>
           <button id="btn-lang" class="btn" type="button" title="Language">🌐</button>
         </div>
+        <!-- feature T20: "ЧЕЛЛЕНДЖ ДНЯ: <название> · Сегодня: N" (game.js fills it) -->
+        <p id="daily-line" class="daily-line"></p>
         <p class="hint" data-i18n="hintMenu">Enter — старт · M — звук</p>
       </div>
     </div>
@@ -249,6 +253,8 @@
   <script src="js/skins.js"></script>
   <!-- feature T19: meta-progression upgrades (SPEC §19) — after skins, before ui -->
   <script src="js/upgrades.js"></script>
+  <!-- feature T20: daily challenge (SPEC §20) — after upgrades, before ui -->
+  <script src="js/daily.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/game.js"></script>
 </body>

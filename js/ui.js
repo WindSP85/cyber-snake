@@ -104,7 +104,9 @@
   let boardFetching = false;
 
   /* the mode badge lives right under the board screen title; a JS-made
-     span so the markup (and the local-mode layout) stays untouched */
+     span so the markup (and the local-mode layout) stays untouched.
+     feature T20: badges stack in creation order below the title — the
+     mode badge first, the season badge right under it */
   function boardBadge(id) {
     const existing = byId(id);
     if (existing) return existing;
@@ -115,7 +117,12 @@
     const el = document.createElement('span');
     el.id = id;
     el.className = 'board-mode';
-    title.parentNode.insertBefore(el, title.nextSibling);
+    let anchor = title.nextSibling;
+    while (anchor && anchor.nodeType === 1 && anchor.classList &&
+      anchor.classList.contains('board-mode')) {
+      anchor = anchor.nextSibling; // skip the badges already on screen
+    }
+    title.parentNode.insertBefore(el, anchor);
     return el;
   }
 
@@ -141,6 +148,28 @@
     if (badge) badge.textContent = t('boardLoading');
   }
 
+  /* feature T20 (SPEC §20): the "СЕЗОН: MM.YYYY" badge under the mode
+     badge — shown in every global-mode outcome (even when the remote
+     fetch degraded to the local rows); removed in local mode */
+  function setBoardSeason(show) {
+    const el = byId('board-season');
+    if (!show) {
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+      return;
+    }
+    const season = (CS.Leaderboard &&
+      typeof CS.Leaderboard.season === 'function')
+      ? CS.Leaderboard.season()
+      : '';
+    if (!/^\d{4}-\d{2}$/.test(season)) return;
+    const badge = boardBadge('board-season');
+    if (badge) {
+      // 'YYYY-MM' → the MM.YYYY display form (i18n seasonBadge '{1}')
+      badge.textContent = t('seasonBadge',
+        season.slice(5) + '.' + season.slice(0, 4));
+    }
+  }
+
   /* local rows instantly; in global mode the badge goes up right away
      and a guarded fetchRemote re-renders with the cloud top — or, on
      any failure, falls back to the local board with an offline badge.
@@ -154,11 +183,13 @@
       CS.Leaderboard.isGlobal());
     if (!global) {
       setBoardMode(null);
+      setBoardSeason(false); // feature T20: no season outside the cloud
       setBoardLoading(false);
       renderBoardRows(loadBoard());
       return;
     }
     setBoardMode('boardGlobal');
+    setBoardSeason(true); // feature T20: the badge shows in every outcome
     renderBoardRows(loadBoard()); // instant placeholder while loading
     if (boardFetching) return;    // fetch guard: one request at a time
     boardFetching = true;
