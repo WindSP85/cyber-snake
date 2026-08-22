@@ -6,6 +6,9 @@
    (onCut), hunter turret (projectiles + mines), the devourer
    (chases the head, bites the tail — onTailBite), cryogen
    (freeze wave — onFreeze) and sys admin (laser + snipe + drones).
+   Feature T18 (SPEC §18) gives every boss type a unique core model:
+   warden octahedron-eye, queen crown, omega cube-matrix, decompiler
+   saw, hunter turret, devourer maw, cryogen crystals, admin monitor.
    No dependencies beyond the events callbacks.
    ============================================================ */
 (function () {
@@ -47,6 +50,15 @@
   const BITE_COOLDOWN    = 1.2;  // type 6: min seconds between bites
   const CHEW_TIME        = 0.5;  // type 6: "chewing" pause after a bite
   const TURRET_MOVE      = 2.6;  // type 5: lazy drift along the edges
+
+  /* feature T18 (SPEC §18): core model tuning */
+  const HIT_FLASH   = 0.15;  // white core flash on damage, seconds
+  const BITE_FLASH  = 0.12;  // type 6: maw snap flash, seconds
+  const SAW_SPIN    = 3.2;   // type 4: idle saw speed, rad/s (x4 attacking)
+  const RECOIL_TIME = 0.15;  // type 5: barrel recoil, seconds
+  const RECOIL_PX   = 4;     // type 5: recoil depth, px
+  const CRYO_LEN    = [0.95, 0.6, 0.85, 0.55, 0.9, 0.62, 0.8, 0.58]; // type 7
+  const CODE_COLS   = ['#00f0ff', '#00ff9d', '#d9c8ff'];             // type 8
 
   /* ---------- small helpers ---------- */
   function key(x, y) { return x + ',' + y; }
@@ -168,6 +180,12 @@
       this.biteCooldown = 0;       // type 6: rate limit for onTailBite
       this.chewTimer = 0;          // type 6: munching pause after a bite
 
+      // feature T18 (SPEC §18): core model state
+      this.hitFlash = 0;           // white flash while the boss takes damage
+      this.biteFlash = 0;          // type 6: maw snap flash
+      this.sawAngle = 0;           // type 4: saw rotation accumulator
+      this.recoil = 0;             // type 5: barrel recoil timer
+
       this.emit('onWarn', tr('bossWarn') + this.name);
       this.emit('onSfx', 'warn');
     }
@@ -185,6 +203,14 @@
     update(dt, snakeCells) {
       if (!this.active || this.phase === 'dead') return;
       this.time += dt;
+
+      // feature T18: model timers tick in every live phase
+      if (this.hitFlash > 0) this.hitFlash = Math.max(0, this.hitFlash - dt);
+      if (this.biteFlash > 0) this.biteFlash = Math.max(0, this.biteFlash - dt);
+      if (this.recoil > 0) this.recoil = Math.max(0, this.recoil - dt);
+      if (this.bossType === 4) {
+        this.sawAngle += dt * SAW_SPIN * (this.phase === 'attack' ? 4 : 1);
+      }
 
       const cells = Array.isArray(snakeCells) ? snakeCells : [];
       this.snakeCells = cells;
@@ -480,6 +506,7 @@
 
     fireProjectile() {
       if (!this.snipe) return;
+      if (this.bossType === 5) this.recoil = RECOIL_TIME; // feature T18 kickback
       const ox = this.x + 1;             // boss 2x2 center, cell units
       const oy = this.y + 1;
       let dx = this.snipe.tx + 0.5 - ox;
@@ -664,6 +691,7 @@
 
     doBite() {
       this.emit('onTailBite');
+      this.biteFlash = BITE_FLASH; // feature T18: the maw snaps shut
       this.biteCooldown = BITE_COOLDOWN;
       this.chewTimer = CHEW_TIME;
       // snap any running slide so the retreat starts from the landed cell
@@ -803,6 +831,7 @@
       if (!this.charge || this.charge.x !== x || this.charge.y !== y) return false;
       this.charge = null;
       this.chargeRespawn = CHARGE_RESPAWN;
+      this.hitFlash = HIT_FLASH;   // feature T18: the core flashes white
       this.hp -= 1;
       this.emit('onSfx', 'hit');
       if (this.hp <= 0) this.die();
@@ -955,6 +984,8 @@
       }
     }
 
+    /* feature T18 (SPEC §18): the shared shell — position, head tracking,
+       telegraph heat — then a unique core model per type */
     drawBoss(g, cell) {
       const p = this.renderPos();
       let px = p.x * cell;
@@ -967,57 +998,12 @@
       const cx = px + size / 2;
       const cy = py + size / 2;
       const pulse = 0.5 + 0.5 * Math.sin(this.time * 6);
-      const isTele = this.phase === 'telegraph';
-      const tele = isTele ? 0.5 + 0.5 * Math.sin(this.time * 20) : 0;
+      const hot = this.phase === 'telegraph';
+      const tele = hot ? 0.5 + 0.5 * Math.sin(this.time * 20) : 0;
       const skin = this.skin();
-      const chewing = this.chewTimer > 0 ? 1 - this.chewTimer / CHEW_TIME : 0;
+      const flash = this.hitFlash > 0 ? Math.min(1, this.hitFlash / HIT_FLASH) : 0;
 
-      // rotating spikes around the core
-      g.save();
-      g.translate(cx, cy);
-      g.rotate(this.time * 0.9);
-      g.strokeStyle = skin.ring;
-      g.lineWidth = 2;
-      g.globalAlpha = 0.5 + pulse * 0.3 + tele * 0.2;
-      const spikes = this.bossType === 7 ? 6 : 10;
-      for (let i = 0; i < spikes; i++) {
-        const a = (Math.PI * 2 * i) / spikes;
-        const r1 = cell * (0.5 + pulse * 0.06);
-        const r2 = cell * (0.9 + pulse * 0.12 + tele * 0.12);
-        g.beginPath();
-        g.moveTo(Math.cos(a) * r1, Math.sin(a) * r1);
-        g.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
-        g.stroke();
-      }
-      g.restore();
-
-      // pulsing core block in the type palette
-      g.shadowColor = skin.ring;
-      g.shadowBlur = 16 + pulse * 10 + tele * 22;
-      const grad = g.createRadialGradient(cx, cy, cell * 0.2, cx, cy, size * 0.75);
-      grad.addColorStop(0, skin.c1 + (0.5 + tele * 0.4).toFixed(3) + ')');
-      grad.addColorStop(1, skin.c2);
-      g.fillStyle = grad;
-      roundRectPath(g, px + 2, py + 2, size - 4, size - 4, 6);
-      g.fill();
-      g.shadowBlur = 0;
-      g.lineWidth = 2;
-      g.strokeStyle = skin.ring;
-      g.stroke();
-
-      // inner eye, pupil tracks the snake head
-      const eyeR = cell * 0.34 * (1 + tele * 0.12);
-      g.shadowColor = skin.ring;
-      g.shadowBlur = 10 + tele * 14;
-      g.fillStyle = '#0a0410';
-      g.beginPath();
-      g.arc(cx, cy, eyeR, 0, Math.PI * 2);
-      g.fill();
-      g.shadowBlur = 0;
-      g.lineWidth = 2;
-      g.strokeStyle = skin.ring;
-      g.stroke();
-
+      // unit vector toward the snake head (eyes, maws and barrels track it)
       let dx = 0, dy = 1;
       if (this.head) {
         const hx = this.head.x * cell + cell / 2 - cx;
@@ -1026,95 +1012,460 @@
         dx = hx / len;
         dy = hy / len;
       }
-      g.fillStyle = isTele ? skin.ring : skin.pupil;
-      g.beginPath();
-      g.arc(cx + dx * eyeR * 0.45, cy + dy * eyeR * 0.45, cell * 0.15 * (1 + tele * 0.3), 0, Math.PI * 2);
-      g.fill();
 
-      this.drawTypeMarks(g, cell, cx, cy, dx, dy, chewing, pulse);
+      switch (this.bossType) {
+        case 1: this.drawWardenCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin); break;
+        case 2: this.drawQueenCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin); break;
+        case 3: this.drawOmegaCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin); break;
+        case 4: this.drawSawCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin); break;
+        case 5: this.drawTurretCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin); break;
+        case 6: this.drawDevourerCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin); break;
+        case 7: this.drawCryoCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin); break;
+        default: this.drawAdminCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin); break;
+      }
+
+      // feature T18: damage taken — a short white flash over the core
+      if (flash > 0) {
+        g.shadowBlur = 0;
+        g.fillStyle = 'rgba(255,255,255,' + (flash * 0.7).toFixed(3) + ')';
+        g.beginPath();
+        g.arc(cx, cy, cell * 0.92, 0, Math.PI * 2);
+        g.fill();
+      }
+      // feature T18: mk-series repeats just get a brighter core rim
+      if (this.bossCycle > 0) {
+        g.strokeStyle = skin.ring;
+        g.lineWidth = 2;
+        g.shadowColor = skin.ring;
+        g.shadowBlur = 8;
+        g.globalAlpha = 0.75 + 0.25 * Math.sin(this.time * 4);
+        g.beginPath();
+        g.arc(cx, cy, cell * 1.04 + Math.sin(this.time * 3) * 1.5, 0, Math.PI * 2);
+        g.stroke();
+        g.globalAlpha = 1;
+        g.shadowBlur = 0;
+      }
     }
 
-    /* feature T9: small signature details per boss type */
-    drawTypeMarks(g, cell, cx, cy, dx, dy, chewing, pulse) {
-      if (this.bossType === 5) {
-        // turret barrel pointing at the aim / head
-        g.save();
-        g.strokeStyle = '#ff7a00';
-        g.lineWidth = 4;
-        g.lineCap = 'round';
-        g.shadowColor = '#ff7a00';
-        g.shadowBlur = 8;
+    /* feature T18, type 1: warden — an octahedron-eye: two crossed
+       rhombi (one perspective-squashed), two counter-rotating rings
+       between them and a pupil tracking the snake head */
+    drawWardenCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin) {
+      const hA = cell * 1.02, wA = cell * 0.55;  // tall rhombus
+      const hB = cell * 0.55, wB = cell * 1.02;  // squashed twin
+      g.save();
+      g.translate(cx, cy);
+      g.rotate(Math.sin(this.time * 0.7) * 0.12);  // slow crystal tilt
+      g.shadowColor = skin.ring;
+      g.shadowBlur = 14 + pulse * 8 + tele * 20;
+      const grad = g.createRadialGradient(0, 0, cell * 0.15, 0, 0, wB);
+      grad.addColorStop(0, skin.c1 + (0.55 + tele * 0.35).toFixed(3) + ')');
+      grad.addColorStop(1, skin.c2);
+      g.fillStyle = grad;
+      g.beginPath();                                // wide rhombus body
+      g.moveTo(0, -hB); g.lineTo(wB, 0); g.lineTo(0, hB); g.lineTo(-wB, 0);
+      g.closePath();
+      g.fill();
+      g.shadowBlur = 0;
+      g.lineWidth = 2;
+      g.strokeStyle = skin.ring;
+      g.stroke();
+      g.beginPath();                                // counter-rotating rings
+      g.ellipse(0, 0, cell * 0.78, cell * 0.3, this.time * 1.6, 0, Math.PI * 2);
+      g.stroke();
+      g.beginPath();
+      g.ellipse(0, 0, cell * 0.56, cell * 0.22, -this.time * 1.1, 0, Math.PI * 2);
+      g.stroke();
+      g.globalAlpha = 0.55 + tele * 0.4;
+      g.beginPath();                                // tall rhombus on top
+      g.moveTo(0, -hA); g.lineTo(wA, 0); g.lineTo(0, hA); g.lineTo(-wA, 0);
+      g.closePath();
+      g.stroke();
+      g.globalAlpha = 1;
+      const eyeR = cell * 0.3 * (1 + tele * 0.12);  // the eye itself
+      g.shadowColor = skin.ring;
+      g.shadowBlur = 8 + tele * 12;
+      g.fillStyle = '#0a0410';
+      g.beginPath();
+      g.arc(0, 0, eyeR, 0, Math.PI * 2);
+      g.fill();
+      g.shadowBlur = 0;
+      g.stroke();
+      g.fillStyle = hot ? skin.ring : skin.pupil;
+      g.beginPath();
+      g.arc(dx * eyeR * 0.45, dy * eyeR * 0.45, cell * 0.13 * (1 + tele * 0.25), 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+
+    /* feature T18, type 2: virus queen — a pulsing core crowned with
+       five triangular spikes, waving a fringe of short tentacles below */
+    drawQueenCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin) {
+      g.save();
+      g.translate(cx, cy);
+      const coreR = cell * (0.6 + pulse * 0.07 + tele * 0.05);
+      g.shadowColor = skin.ring;
+      g.shadowBlur = 14 + pulse * 8 + tele * 20;
+      const grad = g.createRadialGradient(0, -coreR * 0.25, cell * 0.1, 0, 0, coreR);
+      grad.addColorStop(0, skin.c1 + (0.55 + tele * 0.35).toFixed(3) + ')');
+      grad.addColorStop(1, skin.c2);
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(0, 0, coreR, 0, Math.PI * 2);
+      g.fill();
+      g.shadowBlur = 0;
+      g.lineWidth = 2;
+      g.strokeStyle = skin.ring;
+      g.stroke();
+      g.fillStyle = skin.c1 + (0.75 + tele * 0.25).toFixed(3) + ')'; // spikes
+      g.strokeStyle = skin.pupil;
+      g.lineWidth = 1.5;
+      for (let k = 0; k < 5; k++) {
+        const a = -Math.PI / 2 + (k - 2) * 0.42;    // arc across the top
+        const tall = k === 2 ? 0.34 : (k % 2 === 0 ? 0.22 : 0.14);
+        const rTip = cell * (0.62 + tall + tele * 0.08);
+        const rBase = coreR * 0.94;
         g.beginPath();
-        g.moveTo(cx, cy);
-        g.lineTo(cx + dx * cell * 1.05, cy + dy * cell * 1.05);
+        g.moveTo(Math.cos(a) * rTip, Math.sin(a) * rTip);
+        g.lineTo(Math.cos(a - 0.17) * rBase, Math.sin(a - 0.17) * rBase);
+        g.lineTo(Math.cos(a + 0.17) * rBase, Math.sin(a + 0.17) * rBase);
+        g.closePath();
+        g.fill();
         g.stroke();
-        g.restore();
-      } else if (this.bossType === 6) {
-        // the maw: two rows of teeth opening while chewing
-        const open = 0.15 + chewing * 0.85;
-        const ang = Math.atan2(dy, dx);
-        g.save();
-        g.translate(cx, cy);
-        g.rotate(ang);
-        g.fillStyle = '#ffd7de';
-        g.shadowColor = '#ff2d55';
-        g.shadowBlur = 10;
-        const tw = cell * 0.42;              // mouth depth
-        const th = cell * 0.16 * open + 2;   // half the opening
-        for (let s = -1; s <= 1; s += 2) {
-          g.beginPath();
-          g.moveTo(cell * 0.1, s * th * 0.2);
-          g.lineTo(cell * 0.1 + tw, s * th);
-          g.lineTo(cell * 0.1 + tw * 0.55, s * th * 0.25);
-          g.closePath();
-          g.fill();
-        }
-        g.restore();
-      } else if (this.bossType === 7) {
-        // ice crystals growing on the core
-        g.save();
-        g.fillStyle = '#eafaff';
-        g.strokeStyle = '#7de3ff';
-        g.lineWidth = 1.5;
-        g.shadowColor = '#7de3ff';
-        g.shadowBlur = 8;
-        for (let k = 0; k < 3; k++) {
-          const a = -Math.PI / 2 + (k - 1) * 0.7 + this.time * 0.3;
-          const ox = Math.cos(a) * cell * 0.95;
-          const oy = Math.sin(a) * cell * 0.95;
-          const h = cell * (0.28 + pulse * 0.1);
-          g.beginPath();
-          g.moveTo(cx + ox, cy + oy - h);
-          g.lineTo(cx + ox + h * 0.32, cy + oy);
-          g.lineTo(cx + ox, cy + oy + h * 0.4);
-          g.lineTo(cx + ox - h * 0.32, cy + oy);
-          g.closePath();
-          g.fill();
-          g.stroke();
-        }
-        g.restore();
-      } else if (this.bossType === 8) {
-        // admin crown: three status diodes
-        g.save();
-        g.shadowBlur = 0;
-        for (let k = -1; k <= 1; k++) {
-          const blink = 0.4 + 0.6 * Math.abs(Math.sin(this.time * 4 + k));
-          g.fillStyle = k === 0 ? '#00f0ff' : '#8a5cff';
-          g.beginPath();
-          g.arc(cx + k * cell * 0.42, cy - cell * 0.72, cell * 0.1 * blink + 1, 0, Math.PI * 2);
-          g.fill();
-        }
-        g.restore();
-      } else if (this.bossType === 4) {
-        // decompiler: thin scanning ring, hint of the beam to come
-        g.save();
-        g.strokeStyle = 'rgba(0,240,255,0.5)';
-        g.lineWidth = 1.5;
-        g.beginPath();
-        g.arc(cx, cy, cell * 1.15 + Math.sin(this.time * 5) * 2, 0, Math.PI * 2);
-        g.stroke();
-        g.restore();
       }
+      g.beginPath();                                // crown band
+      g.strokeStyle = skin.ring;
+      g.lineWidth = 2.5;
+      g.arc(0, 0, coreR * 0.9, -Math.PI * 0.82, -Math.PI * 0.18);
+      g.stroke();
+      g.lineCap = 'round';                          // tentacle fringe
+      g.lineWidth = 2.5;
+      for (let i = 0; i < 4; i++) {
+        const a = Math.PI / 2 + (i - 1.5) * 0.38;
+        const sway = Math.sin(this.time * 2.6 + i * 1.7);
+        const r1 = cell * (0.9 + 0.08 * Math.sin(this.time * 3.1 + i));
+        const ma = a + sway * 0.35;
+        g.beginPath();
+        g.moveTo(Math.cos(a) * coreR * 0.92, Math.sin(a) * coreR * 0.92);
+        g.quadraticCurveTo(
+          Math.cos(ma) * (coreR + r1) * 0.5, Math.sin(ma) * (coreR + r1) * 0.5,
+          Math.cos(a) * r1, Math.sin(a) * r1
+        );
+        g.stroke();
+      }
+      g.lineCap = 'butt';
+      g.fillStyle = hot ? skin.ring : skin.pupil;   // nucleus
+      g.beginPath();
+      g.arc(0, 0, cell * 0.14 * (1 + pulse * 0.3), 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+
+    /* feature T18, type 3: omega algorithm — a 3x3 matrix of mini-cubes;
+       each cube blinks on its own deterministic phase (no randomness),
+       the telegraph pushes the eight outer cubes outward */
+    drawOmegaCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin) {
+      const s = cell * 0.5;
+      const step = s + cell * 0.12;
+      g.save();
+      g.translate(cx, cy);
+      g.lineWidth = 1.5;
+      g.strokeStyle = skin.ring;
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          const center = i === 1 && j === 1;
+          let ox = 0, oy = 0;
+          if (!center) {                            // telegraph: push out
+            const n = Math.sqrt((i - 1) * (i - 1) + (j - 1) * (j - 1));
+            const push = tele * cell * 0.16;
+            ox = (i - 1) / n * push;
+            oy = (j - 1) / n * push;
+          }
+          const b = center
+            ? 0.8 + pulse * 0.2
+            : Math.max(0, Math.sin(this.time * 2.8 + (i * 3 + j) * 1.9));
+          if (center) {
+            g.shadowColor = skin.ring;
+            g.shadowBlur = 10 + tele * 14;
+          }
+          g.fillStyle = skin.c1 + (0.3 + 0.7 * b).toFixed(3) + ')';
+          roundRectPath(g, (i - 1) * step + ox - s / 2, (j - 1) * step + oy - s / 2, s, s, 3);
+          g.fill();
+          if (center) g.shadowBlur = 0;
+          g.globalAlpha = Math.min(1, 0.55 + 0.45 * b + tele * 0.3);
+          g.stroke();
+          g.globalAlpha = 1;
+        }
+      }
+      g.restore();
+    }
+
+    /* feature T18, type 4: decompiler — a circular saw: a 14-tooth disc
+       spinning at a constant rate (x4 while attacking) around a bolted
+       hub; the telegraph tints the whole blade yellow */
+    drawSawCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin) {
+      const N = 14;
+      const rTip = cell * 0.95;
+      const rVal = cell * 0.68;
+      const st = Math.PI * 2 / N;
+      const line = hot ? '#ffe600' : skin.ring;
+      g.save();
+      g.translate(cx, cy);
+      g.rotate(this.sawAngle);
+      g.shadowColor = line;
+      g.shadowBlur = 10 + pulse * 6 + tele * 18;
+      g.fillStyle = skin.c2;
+      g.beginPath();
+      for (let t = 0; t < N; t++) {                 // toothed rim
+        const a = t * st;
+        if (t === 0) g.moveTo(Math.cos(a) * rVal, Math.sin(a) * rVal);
+        else g.lineTo(Math.cos(a) * rVal, Math.sin(a) * rVal);
+        g.lineTo(Math.cos(a + st * 0.32) * rTip, Math.sin(a + st * 0.32) * rTip);
+        g.lineTo(Math.cos(a + st * 0.68) * rVal, Math.sin(a + st * 0.68) * rVal);
+      }
+      g.closePath();
+      g.fill();
+      g.shadowBlur = 0;
+      g.lineWidth = 2;
+      g.strokeStyle = line;
+      g.stroke();
+      g.fillStyle = skin.c1 + (0.25 + tele * 0.3).toFixed(3) + ')';  // inner disc
+      g.beginPath();
+      g.arc(0, 0, cell * 0.5, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.fillStyle = '#04141c';                      // bolted hub
+      g.beginPath();
+      g.arc(0, 0, cell * 0.3, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.fillStyle = line;
+      for (let k = 0; k < 5; k++) {                 // bolts ride the blade
+        const a = k * Math.PI * 2 / 5;
+        g.beginPath();
+        g.arc(Math.cos(a) * cell * 0.19, Math.sin(a) * cell * 0.19, Math.max(1.5, cell * 0.045), 0, Math.PI * 2);
+        g.fill();
+      }
+      g.fillStyle = skin.pupil;                     // axle
+      g.beginPath();
+      g.arc(0, 0, cell * 0.06, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+
+    /* feature T18, type 5: hunter turret — a trapezoid mount with a
+       pivot dome and a barrel tracking the aim point; every shot kicks
+       the barrel back RECOIL_PX for RECOIL_TIME seconds */
+    drawTurretCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin) {
+      let ax = dx, ay = dy;                         // aim: locked cell first
+      if (this.snipe) {
+        const tx = (this.snipe.tx + 0.5) * cell - cx;
+        const ty = (this.snipe.ty + 0.5) * cell - cy;
+        const len = Math.sqrt(tx * tx + ty * ty) || 1;
+        ax = tx / len;
+        ay = ty / len;
+      }
+      g.save();
+      g.translate(cx, cy);
+      g.lineWidth = 2;
+      g.strokeStyle = skin.ring;
+      g.shadowColor = skin.ring;
+      g.shadowBlur = 10 + pulse * 6 + tele * 16;
+      g.fillStyle = skin.c2;                        // trapezoid mount
+      g.beginPath();
+      g.moveTo(-cell * 0.78, cell * 0.72);
+      g.lineTo(cell * 0.78, cell * 0.72);
+      g.lineTo(cell * 0.42, -cell * 0.5);
+      g.lineTo(-cell * 0.42, -cell * 0.5);
+      g.closePath();
+      g.fill();
+      g.shadowBlur = 0;
+      g.stroke();
+      const grad = g.createRadialGradient(0, -cell * 0.12, 2, 0, 0, cell * 0.42);
+      grad.addColorStop(0, skin.c1 + (0.6 + tele * 0.3).toFixed(3) + ')');
+      grad.addColorStop(1, skin.c2);
+      g.fillStyle = grad;                           // pivot dome
+      g.beginPath();
+      g.arc(0, 0, cell * 0.4, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.rotate(Math.atan2(ay, ax));                 // the barrel tracks aim
+      g.translate(-(this.recoil > 0 ? (this.recoil / RECOIL_TIME) * RECOIL_PX : 0), 0);
+      g.fillStyle = skin.c2;
+      g.fillRect(-cell * 0.28, -cell * 0.13, cell * 1.18, cell * 0.26);
+      g.strokeRect(-cell * 0.28, -cell * 0.13, cell * 1.18, cell * 0.26);
+      g.fillRect(cell * 0.74, -cell * 0.2, cell * 0.22, cell * 0.4);  // muzzle
+      g.strokeRect(cell * 0.74, -cell * 0.2, cell * 0.22, cell * 0.4);
+      if (hot) {                                    // charged muzzle dot
+        g.shadowColor = '#ffe600';
+        g.shadowBlur = 12;
+        g.fillStyle = '#ffe600';
+        g.beginPath();
+        g.arc(cell * 0.96, 0, cell * 0.08 * (1 + tele * 0.5), 0, Math.PI * 2);
+        g.fill();
+        g.shadowBlur = 0;
+      }
+      g.restore();
+    }
+
+    /* feature T18, type 6: devourer — a maw of two crescent jaws with
+       four teeth each: they wobble open on sin(animTime) while chasing
+       and snap shut with a white flash on a bite */
+    drawDevourerCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin) {
+      const ang = Math.atan2(dy, dx);
+      const open = this.chewTimer > 0 ? 0.05 : 0.3 + 0.24 * Math.sin(this.time * 5.5);
+      const span = 1.15;
+      const rOut = cell * 0.95;
+      const rIn = cell * 0.38;
+      g.save();
+      g.translate(cx, cy);
+      g.rotate(ang);
+      g.fillStyle = '#1a020c';                      // dark throat
+      g.beginPath();
+      g.arc(0, 0, rIn + cell * 0.06, 0, Math.PI * 2);
+      g.fill();
+      if (this.biteFlash > 0) {                     // bite snap flash
+        g.fillStyle = 'rgba(255,255,255,' + (this.biteFlash / BITE_FLASH * 0.8).toFixed(3) + ')';
+        g.beginPath();
+        g.arc(0, 0, rIn + cell * 0.02, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.lineWidth = 2;
+      g.strokeStyle = skin.ring;
+      for (let s = -1; s <= 1; s += 2) {            // two crescent jaws
+        const a0 = s * open;
+        const a1 = s * (open + span);
+        g.shadowColor = skin.ring;
+        g.shadowBlur = 12 + pulse * 6 + tele * 16;
+        g.fillStyle = skin.c2;
+        g.beginPath();
+        g.arc(0, 0, rOut, Math.min(a0, a1), Math.max(a0, a1));
+        g.arc(0, 0, rIn, Math.max(a0, a1), Math.min(a0, a1), true);
+        g.closePath();
+        g.fill();
+        g.shadowBlur = 0;
+        g.stroke();
+      }
+      g.fillStyle = skin.pupil;                     // four teeth per jaw
+      const tipR = Math.max(cell * 0.12, rIn - cell * 0.22);
+      for (let s = -1; s <= 1; s += 2) {
+        for (let k = 0; k < 4; k++) {
+          const a = s * (open + (span * (k + 0.5)) / 4);
+          const dw = (span / 4) * 0.38;
+          g.beginPath();
+          g.moveTo(Math.cos(a - dw) * rIn, Math.sin(a - dw) * rIn);
+          g.lineTo(Math.cos(a) * tipR, Math.sin(a) * tipR);
+          g.lineTo(Math.cos(a + dw) * rIn, Math.sin(a + dw) * rIn);
+          g.closePath();
+          g.fill();
+        }
+      }
+      g.restore();
+    }
+
+    /* feature T18, type 7: cryogen — a conglomerate of eight crystal
+       shards of set lengths, each flickering on its own deterministic
+       phase; the freeze wave/telegraph flares them ice-blue */
+    drawCryoCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin) {
+      const chill = Math.max(this.freezeWave, hot && this.attackKind === 'freeze' ? tele : 0);
+      g.save();
+      g.translate(cx, cy);
+      g.lineWidth = 1.5;
+      for (let i = 0; i < 8; i++) {
+        const a = i * Math.PI / 4 + 0.18;
+        const len = cell * CRYO_LEN[i] * (1 + chill * 0.1);
+        const midR = len * 0.55;
+        const tw = 0.5 + 0.5 * Math.sin(this.time * (2 + (i % 3) * 0.9) + i * 2.4);
+        g.fillStyle = skin.c1 + Math.min(1, 0.25 + 0.6 * tw + chill * 0.35).toFixed(3) + ')';
+        g.beginPath();
+        g.moveTo(Math.cos(a) * len, Math.sin(a) * len);                   // tip
+        g.lineTo(Math.cos(a - 0.34) * midR, Math.sin(a - 0.34) * midR);   // flank
+        g.lineTo(-Math.cos(a) * cell * 0.1, -Math.sin(a) * cell * 0.1);   // base
+        g.lineTo(Math.cos(a + 0.34) * midR, Math.sin(a + 0.34) * midR);
+        g.closePath();
+        g.fill();
+        g.strokeStyle = chill > 0.05 ? '#eafaff' : skin.ring;
+        g.globalAlpha = Math.min(1, 0.4 + 0.5 * tw + chill * 0.3);
+        g.stroke();
+        g.globalAlpha = 1;
+      }
+      g.shadowColor = skin.ring;                    // icy nucleus
+      g.shadowBlur = 12 + pulse * 8 + tele * 16 + chill * 14;
+      g.fillStyle = chill > 0.05 ? '#eafaff' : skin.pupil;
+      g.beginPath();
+      g.arc(0, 0, cell * 0.22 * (1 + pulse * 0.15 + chill * 0.2), 0, Math.PI * 2);
+      g.fill();
+      g.shadowBlur = 0;
+      g.restore();
+    }
+
+    /* feature T18, type 8: sys admin — a monitor: bezel, a screen of
+       code bars scrolling down on animTime (deterministic layout), an
+       antenna with a beacon; the screen reddens while attacking */
+    drawAdminCore(g, cell, cx, cy, dx, dy, pulse, tele, hot, skin) {
+      const attacking = this.phase === 'attack';
+      const bw = cell * 1.7;
+      const bh = cell * 1.3;
+      g.save();
+      g.translate(cx, cy + cell * 0.08);
+      g.shadowColor = skin.ring;
+      g.shadowBlur = 12 + pulse * 6 + tele * 18;
+      g.fillStyle = skin.c2;                        // bezel
+      roundRectPath(g, -bw / 2, -bh / 2, bw, bh, 6);
+      g.fill();
+      g.shadowBlur = 0;
+      g.lineWidth = 2;
+      g.strokeStyle = attacking ? '#ff2d55' : skin.ring;
+      g.stroke();
+      const sw = bw - cell * 0.26;
+      const sh = bh - cell * 0.26;
+      const sx = -sw / 2;
+      const sy = -sh / 2;
+      g.fillStyle = attacking ? '#1c0714' : '#0b0620';
+      g.fillRect(sx, sy, sw, sh);                   // screen
+      g.save();
+      g.beginPath();
+      g.rect(sx, sy, sw, sh);
+      g.clip();
+      const rowH = cell * 0.15;
+      const rows = Math.ceil(sh / rowH) + 1;
+      const off = (this.time * cell * 0.9) % rowH;  // code scrolls down
+      for (let r = 0; r < rows; r++) {
+        const h1 = Math.sin((r + 7.13) * 12.9898) * 43758.5453;  // stable
+        const f1 = h1 - Math.floor(h1);             // per-row pseudo-random
+        const h2 = Math.sin((r + 3.71) * 78.233) * 12543.21;
+        const f2 = h2 - Math.floor(h2);
+        const ly = sy + r * rowH + off - rowH;
+        const lw = sw * (0.25 + 0.5 * f1);
+        const lx = sx + cell * 0.07 + f2 * sw * 0.3;
+        g.fillStyle = attacking ? '#ff2d55' : CODE_COLS[(f1 * 3 | 0) % 3];
+        g.fillRect(lx, ly, lw, rowH * 0.42);
+        if (f2 > 0.5) {                             // "value" continuation
+          g.fillRect(lx + lw + cell * 0.06, ly, sw * 0.12 * f1 + 2, rowH * 0.42);
+        }
+      }
+      g.fillStyle = 'rgba(255,255,255,0.06)';       // passing scanline
+      g.fillRect(sx, sy + ((this.time * cell * 1.6) % sh), sw, 2);
+      g.restore();                                  // screen clip off
+      if (attacking || hot) {                       // red cast on attacks
+        g.fillStyle = 'rgba(255,45,85,' + Math.min(0.55, (attacking ? 0.28 : 0.1) + tele * 0.15).toFixed(3) + ')';
+        g.fillRect(sx, sy, sw, sh);
+      }
+      g.strokeStyle = skin.ring;                    // antenna + beacon
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(0, -bh / 2);
+      g.lineTo(0, -bh / 2 - cell * 0.3);
+      g.stroke();
+      const blink = 0.5 + 0.5 * Math.sin(this.time * 6);
+      g.shadowColor = '#00f0ff';
+      g.shadowBlur = 6 + blink * 8;
+      g.fillStyle = '#00f0ff';
+      g.beginPath();
+      g.arc(0, -bh / 2 - cell * 0.34, cell * 0.07 * (0.7 + blink * 0.5), 0, Math.PI * 2);
+      g.fill();
+      g.shadowBlur = 0;
+      g.restore();
     }
 
     /* feature T9, type 4: the shredder beam — warning band, then a
