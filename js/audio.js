@@ -806,6 +806,21 @@
         const ng = mkGain(tt, 0.18, 0.05);
         n.connect(nf); nf.connect(ng); ng.connect(sfxBus); reg(n, [nf, ng]);
       });
+    },
+
+    /* feature T16: achievement fanfare — a solemn C5-E5-G5 triangle
+       arpeggio up, each note trailed by a soft octave-up shimmer */
+    ach: function (t) {
+      [72, 76, 79].forEach(function (m, i) {
+        const tt = t + i * 0.12;
+        const dur = i === 2 ? 0.5 : 0.2;
+        const o = mkOsc('triangle', NOTE(m), tt, tt + dur + 0.05);
+        const g = mkGain(tt, 0.24, dur);
+        o.connect(g); g.connect(sfxBus); reg(o, [g]);
+        const sh = mkOsc('sine', NOTE(m) * 2, tt, tt + dur + 0.3);
+        const sg = mkGain(tt, 0.05, dur + 0.25, 0.05);
+        sh.connect(sg); sg.connect(sfxBus); reg(sh, [sg]);
+      });
     }
   };
 

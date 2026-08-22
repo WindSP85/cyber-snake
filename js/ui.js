@@ -7,7 +7,7 @@
 
   const CS = window.CS = window.CS || {};
 
-  const SCREENS = ['lang', 'menu', 'controls', 'board', 'pause', 'gameover'];
+  const SCREENS = ['lang', 'menu', 'controls', 'board', 'ach', 'pause', 'gameover'];
   const TOAST_MS = 1600;
   const CLEAR_CONFIRM_MS = 3000; // feature T10: "Sure?" arming window
   const HANDLER_KEYS = ['start', 'resume', 'restart', 'menu', 'mute', 'lang', 'save'];
@@ -45,6 +45,7 @@
       else el.classList.add('hidden');
     });
     if (name === 'board') renderBoard(); // feature T10: fresh rows on every show
+    if (name === 'ach') renderAch(); // feature T16: fresh cards on every show
   }
 
   function fire(name) {
@@ -173,6 +174,43 @@
     });
   }
 
+  /* ---------- feature T16: achievements screen (SPEC §16) ---------- */
+
+  /* rebuild the #ach-grid cards + the "N of 13" header; unlocked
+     cards shine (yellow star + bright name), locked ones keep a dim
+     outline but still show the condition — motivation, not mystery */
+  function renderAch() {
+    const grid = byId('ach-grid');
+    if (!grid) return;
+    const list = (CS.Ach && typeof CS.Ach.list === 'function')
+      ? CS.Ach.list()
+      : [];
+    const cnt = (CS.Ach && typeof CS.Ach.count === 'function')
+      ? CS.Ach.count()
+      : { unlocked: 0, total: list.length };
+    /* achOf carries '{1} of {2}': {1} goes through t(), {2} manually */
+    setText('ach-count', t('achOf', cnt.unlocked).replace('{2}', String(cnt.total)));
+    grid.innerHTML = '';
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      const card = document.createElement('div');
+      card.className = 'ach-card' + (a.unlocked ? ' unlocked' : '');
+      const star = document.createElement('span');
+      star.className = 'ach-star';
+      star.textContent = a.unlocked ? '★' : '☆';
+      const name = document.createElement('span');
+      name.className = 'ach-name';
+      name.textContent = t(a.nameKey);
+      const desc = document.createElement('span');
+      desc.className = 'ach-desc';
+      desc.textContent = t(a.descKey);
+      card.appendChild(star);
+      card.appendChild(name);
+      card.appendChild(desc);
+      grid.appendChild(card);
+    }
+  }
+
   /* the gameover name-save block — game.js decides when it shows */
   function hideScoreSave() {
     const el = byId('score-save');
@@ -201,8 +239,8 @@
   }
 
   /* i18n translate (i18n.js always loads before this file) */
-  function t(key) {
-    return CS.I18N && typeof CS.I18N.t === 'function' ? CS.I18N.t(key) : key;
+  function t(key, arg) {
+    return CS.I18N && typeof CS.I18N.t === 'function' ? CS.I18N.t(key, arg) : key;
   }
 
   function updateMuteLabel() {
@@ -295,6 +333,13 @@
     bind('btn-save', function () {
       hideScoreSave();
       fire('save');
+    });
+    // feature T16: achievements screen (menu button + back)
+    bind('btn-ach', function () {
+      showScreen('ach');
+    });
+    bind('btn-ach-back', function () {
+      showScreen('menu');
     });
     bind('mute-btn', function () {
       fire('mute');

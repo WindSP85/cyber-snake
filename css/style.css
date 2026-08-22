@@ -1252,3 +1252,125 @@ body::before {
 body.in-telegram .tg-only {
   display: inline-block;
 }
+
+/* ============================================================
+   Feature T16: achievements — unlock toast + screen grid
+   ============================================================ */
+
+/* the unlock toast is created by CS.Ach itself and floats above
+   everything (screens included): fixed, top-center, yellow frame */
+#ach-toast {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 80;
+  transform: translateX(-50%) translateY(-12px);
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--yellow);
+  background: var(--panel);
+  border: 1px solid var(--yellow);
+  text-shadow: 0 0 10px rgba(255, 230, 0, .7);
+  box-shadow:
+    0 0 24px rgba(255, 230, 0, .35),
+    inset 0 0 14px rgba(255, 230, 0, .08);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .25s ease, transform .25s cubic-bezier(.2, 1.4, .4, 1);
+}
+
+#ach-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* "N of 13" header under the screen title */
+.ach-count {
+  margin: -8px 0 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(255, 230, 0, .7);
+  text-shadow: 0 0 8px rgba(255, 230, 0, .3);
+}
+
+.ach-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 auto 22px;
+  max-width: 560px;
+  text-align: left;
+}
+
+/* locked card: dim dashed outline, the condition stays readable */
+.ach-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas:
+    "star name"
+    "star desc";
+  column-gap: 9px;
+  row-gap: 2px;
+  align-items: start;
+  padding: 11px 13px;
+  background: rgba(4, 5, 12, .55);
+  border: 1px dashed rgba(215, 247, 255, .22);
+}
+
+.ach-card.unlocked {
+  background: rgba(255, 230, 0, .05);
+  border: 1px solid rgba(255, 230, 0, .55);
+  box-shadow:
+    0 0 14px rgba(255, 230, 0, .12),
+    inset 0 0 10px rgba(255, 230, 0, .05);
+}
+
+.ach-star {
+  grid-area: star;
+  font-size: 17px;
+  line-height: 1.2;
+  color: rgba(215, 247, 255, .3);
+}
+
+.ach-card.unlocked .ach-star {
+  color: var(--yellow);
+  text-shadow: 0 0 10px rgba(255, 230, 0, .8);
+}
+
+.ach-name {
+  grid-area: name;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: rgba(215, 247, 255, .5);
+}
+
+.ach-card.unlocked .ach-name {
+  color: #eafcff;
+  text-shadow: 0 0 8px rgba(255, 230, 0, .25);
+}
+
+.ach-desc {
+  grid-area: desc;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(215, 247, 255, .45);
+}
+
+.ach-card.unlocked .ach-desc {
+  color: rgba(215, 247, 255, .7);
+}
+
+@media (max-width: 640px) {
+  .ach-grid {
+    grid-template-columns: 1fr;
+    max-width: 320px;
+  }
+}

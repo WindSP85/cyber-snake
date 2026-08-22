@@ -291,6 +291,7 @@
       CS.UI.hud({ best: best });
     }
     CS.UI.hud({ score: score });
+    CS.Ach.event('score', score); // feature T16: the current score
     return gained;
   }
 
@@ -501,6 +502,7 @@
   function levelUp() {
     level++;
     CS.UI.hud({ level: level });
+    CS.Ach.event('level', level); // feature T16
     CS.UI.toast(tr('toastLevel', level));
     CS.Audio.sfx('levelup');
     if (state !== 'boss') applySpeed(); // tick speed is frozen during a fight
@@ -607,6 +609,7 @@
   function onBossDefeated() {
     const idx = fight ? fight.bossIndex : 1;
     addScore(BOSS_SCORE * idx);
+    CS.Ach.event('bossDown'); // feature T16: all-time kill counter
     CS.TG.haptic('success'); // feature T15: victory pulse
     if (fight) {
       // farewell burst at the boss core (2x2 block center)
@@ -634,6 +637,7 @@
     if (state === 'dying' || state === 'gameover' || state === 'respawning') return;
     CS.TG.haptic('error'); // feature T15: the death buzz
     if (lives > 0) { // feature T8: a spare life reboots the snake
+      CS.Ach.event('respawn'); // feature T16: a spent life counts
       startRespawn();
       return;
     }
@@ -797,6 +801,7 @@
 
   function eatFoodAt(x, y) {
     addScore(FOOD_SCORE * level);
+    CS.Ach.event('meal'); // feature T16
     eaten++;
     growth += 1;
     CS.Audio.sfx('eat');
@@ -873,8 +878,10 @@
     CS.FX.flash('#ffffff', 0.15);
     CS.FX.burst(px, py, '#ff2bd6', 14);
     const kind = forced || rollMystery();
+    CS.Ach.event('mystery'); // feature T16: every container counts
     if (kind === 'jackpot') {
       addScore(MYSTERY_JACKPOT);
+      CS.Ach.event('jackpot'); // feature T16
       CS.TG.haptic('heavy'); // feature T15: the jackpot slams
       CS.UI.toast(tr('mJackpot'));
     } else if (kind === 'double') {
@@ -1047,6 +1054,7 @@
     CS.FX.shake(4);
     if (snake.length > BANK_KEEP) {
       const n = snake.length - BANK_KEEP;
+      CS.Ach.event('bankConverted', n); // feature T16: segments banked
       for (let i = snake.length - 1; i >= BANK_KEEP; i--) {
         CS.FX.burst(
           snake[i].curr.x * CELL + CELL / 2,
@@ -1146,6 +1154,7 @@
       if (escaped[i].x === nx && escaped[i].y === ny) {
         escaped.splice(i, 1);
         addScore(ESCAPED_SCORE);
+        CS.Ach.event('coresCaught'); // feature T16
         CS.Audio.sfx('pickup');
         CS.FX.burst(nx * CELL + CELL / 2, ny * CELL + CELL / 2, '#ff2bd6', 12);
       }
@@ -1184,6 +1193,7 @@
   function startGame() {
     applyGridChange(); // feature T13: the field follows the current screen
     hideScoreSave();   // feature T10: a fresh run drops the save block
+    CS.Ach.resetRun(); // feature T16: per-run achievement counters
     snake = [];
     const cx = Math.floor(GRID_W / 2);
     const cy = Math.floor(GRID_H / 2);
