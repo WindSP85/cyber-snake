@@ -133,7 +133,23 @@
       aCores: 'Поймал оба ядра после распада',
       aBanker: 'Сдал 8+ сегментов в хранилище',
       aMystery10: '10 тайн за всё время',
-      aSurvivor: 'Выжил на всех 3 жизнях'
+      aSurvivor: 'Выжил на всех 3 жизнях',
+      /* feature T17: skins (SPEC §17) */
+      skins: 'Скины',
+      skinsTitle: 'СКИНЫ',
+      skinNeon: 'Неон',
+      skinIce: 'Лёд',
+      skinToxic: 'Токсин',
+      skinMagma: 'Магма',
+      skinGold: 'Золото',
+      skinRainbow: 'Радуга',
+      skinGhost: 'Призрак',
+      skinCondIce: 'Повергни первого босса',
+      skinCondToxic: 'Достигни 10 уровня',
+      skinCondMagma: 'Набери 2500 очков',
+      skinCondGold: 'Сдай 8+ сегментов за раз',
+      skinCondRainbow: 'Повергни 5 боссов',
+      skinCondGhost: 'Открой 10 тайн'
     },
     en: {
       langTitle: 'SELECT LANGUAGE',
@@ -253,7 +269,23 @@
       aCores: 'Caught both split cores',
       aBanker: 'Banked 8+ segments',
       aMystery10: '10 mysteries total',
-      aSurvivor: 'Burned all 3 lives'
+      aSurvivor: 'Burned all 3 lives',
+      /* feature T17: skins (SPEC §17) */
+      skins: 'Skins',
+      skinsTitle: 'SKINS',
+      skinNeon: 'Neon',
+      skinIce: 'Ice',
+      skinToxic: 'Toxic',
+      skinMagma: 'Magma',
+      skinGold: 'Gold',
+      skinRainbow: 'Rainbow',
+      skinGhost: 'Ghost',
+      skinCondIce: 'Defeat your first boss',
+      skinCondToxic: 'Reach level 10',
+      skinCondMagma: 'Score 2500 points',
+      skinCondGold: 'Bank 8+ segments at once',
+      skinCondRainbow: 'Defeat 5 bosses',
+      skinCondGhost: 'Open 10 mysteries'
     }
   };
 

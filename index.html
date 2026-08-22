@@ -61,6 +61,7 @@
           <button id="btn-controls" class="btn" type="button" data-i18n="controls">Управление</button>
           <button id="btn-board" class="btn" type="button" data-i18n="board">Лидеры</button>
           <button id="btn-ach" class="btn" type="button" data-i18n="ach">Достижения</button>
+          <button id="btn-skins" class="btn" type="button" data-i18n="skins">Скины</button>
           <button id="btn-lang" class="btn" type="button" title="Language">🌐</button>
         </div>
         <p class="hint" data-i18n="hintMenu">Enter — старт · M — звук</p>
@@ -137,6 +138,16 @@
         <p id="ach-count" class="ach-count"></p>
         <div id="ach-grid" class="ach-grid"></div>
         <button id="btn-ach-back" class="btn" type="button" data-i18n="back">Назад</button>
+      </div>
+    </div>
+
+    <!-- Screen: skins (feature T17) -->
+    <div id="screen-skins" class="screen hidden">
+      <div class="panel">
+        <h2 class="screen-title" data-i18n="skinsTitle">СКИНЫ</h2>
+        <!-- the swatch grid is (re)built by ui.js renderSkins() -->
+        <div id="skins-grid" class="skins-grid"></div>
+        <button id="btn-skins-back" class="btn" type="button" data-i18n="back">Назад</button>
       </div>
     </div>
 
@@ -222,6 +233,8 @@
   <script src="js/telegram.js"></script>
   <!-- feature T16: achievements (SPEC §16) — after leaderboard, before ui -->
   <script src="js/achievements.js"></script>
+  <!-- feature T17: skins (SPEC §17) — after achievements, before ui -->
+  <script src="js/skins.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/game.js"></script>
 </body>

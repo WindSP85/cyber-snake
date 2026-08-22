@@ -7,7 +7,7 @@
 
   const CS = window.CS = window.CS || {};
 
-  const SCREENS = ['lang', 'menu', 'controls', 'board', 'ach', 'pause', 'gameover'];
+  const SCREENS = ['lang', 'menu', 'controls', 'board', 'ach', 'skins', 'pause', 'gameover'];
   const TOAST_MS = 1600;
   const CLEAR_CONFIRM_MS = 3000; // feature T10: "Sure?" arming window
   const HANDLER_KEYS = ['start', 'resume', 'restart', 'menu', 'mute', 'lang', 'save'];
@@ -46,6 +46,7 @@
     });
     if (name === 'board') renderBoard(); // feature T10: fresh rows on every show
     if (name === 'ach') renderAch(); // feature T16: fresh cards on every show
+    if (name === 'skins') renderSkins(); // feature T17: fresh swatches on every show
   }
 
   function fire(name) {
@@ -211,6 +212,69 @@
     }
   }
 
+  /* ---------- feature T17: skins screen (SPEC §17) ---------- */
+
+  /* rebuild the #skins-grid swatches: each card is a 5-segment mini
+     snake preview (static colors from CS.Skins.preview), the name and
+     — for locked skins — the unlock condition; the active skin shines
+     with a yellow frame + ✓; a click on an unlocked card selects it */
+  function renderSkins() {
+    const grid = byId('skins-grid');
+    if (!grid) return;
+    const list = (CS.Skins && typeof CS.Skins.list === 'function')
+      ? CS.Skins.list()
+      : [];
+    const active = (CS.Skins && typeof CS.Skins.current === 'function')
+      ? CS.Skins.current()
+      : '';
+    const preview = (CS.Skins && typeof CS.Skins.preview === 'function')
+      ? function (id) { return CS.Skins.preview(id); }
+      : function () { return []; };
+    grid.innerHTML = '';
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      const isActive = s.id === active;
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'skin-card' + (isActive ? ' active' : '') +
+        (s.unlocked ? '' : ' locked');
+      const row = document.createElement('span');
+      row.className = 'skin-preview';
+      const colors = preview(s.id);
+      for (let k = 0; k < colors.length; k++) {
+        const seg = document.createElement('i');
+        seg.className = 'skin-seg' + (k === 0 ? ' head' : '');
+        seg.style.background = colors[k];
+        if (k === 0) seg.style.boxShadow = '0 0 8px ' + colors[k];
+        row.appendChild(seg);
+      }
+      const name = document.createElement('span');
+      name.className = 'skin-name';
+      name.textContent = t(s.nameKey);
+      card.appendChild(row);
+      card.appendChild(name);
+      const mark = document.createElement('span');
+      mark.className = 'skin-mark';
+      mark.textContent = isActive ? '✓' : (s.unlocked ? '' : '🔒');
+      card.appendChild(mark);
+      if (!s.unlocked && s.condKey) {
+        const cond = document.createElement('span');
+        cond.className = 'skin-cond';
+        cond.textContent = t(s.condKey);
+        card.appendChild(cond);
+        card.disabled = true; // a locked skin is not clickable
+      } else if (s.unlocked) {
+        card.addEventListener('click', function () {
+          if (CS.Skins && typeof CS.Skins.select === 'function') {
+            CS.Skins.select(s.id);
+          }
+          renderSkins(); // re-render: the ✓ moves to the new skin
+        });
+      }
+      grid.appendChild(card);
+    }
+  }
+
   /* the gameover name-save block — game.js decides when it shows */
   function hideScoreSave() {
     const el = byId('score-save');
@@ -339,6 +403,13 @@
       showScreen('ach');
     });
     bind('btn-ach-back', function () {
+      showScreen('menu');
+    });
+    // feature T17: skins screen (menu button + back)
+    bind('btn-skins', function () {
+      showScreen('skins');
+    });
+    bind('btn-skins-back', function () {
       showScreen('menu');
     });
     bind('mute-btn', function () {

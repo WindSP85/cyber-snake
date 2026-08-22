@@ -149,8 +149,8 @@
   const PALETTE = ['#00f0ff', '#ff2bd6', '#ffe600', '#00ff9d', '#ff7a00'];
   const BG = '#04050c';
   const GRID_LINE = 'rgba(0,240,255,.07)';
-  const HEAD_HSL = [186, 50];       // hue / lightness of #00f0ff
-  const TAIL_HSL = [311, 58];       // hue / lightness of #ff2bd6
+  /* feature T17: the head/tail HSL pair moved to the 'neon' skin in
+     js/skins.js — every segment color now comes from CS.Skins */
 
   const DIR = {
     up: { x: 0, y: -1 },
@@ -236,11 +236,11 @@
     }
   }
 
+  /* feature T17: every segment color comes from the active skin
+     (js/skins.js); the death / respawn / split / bank bursts and
+     drawSegment all reuse this single path */
   function segColor(i, n) {
-    const t = n <= 1 ? 0 : i / (n - 1);
-    const h = HEAD_HSL[0] + (TAIL_HSL[0] - HEAD_HSL[0]) * t;
-    const l = HEAD_HSL[1] + (TAIL_HSL[1] - HEAD_HSL[1]) * t;
-    return 'hsl(' + Math.round(h) + ',100%,' + Math.round(l) + '%)';
+    return CS.Skins.colors(i, n, animTime);
   }
 
   /* feature T11: linear blend of two rgb triples, k = 0..1 */
@@ -1897,15 +1897,19 @@
     const x = (s.prev.x + (s.curr.x - s.prev.x) * t) * CELL;
     const y = (s.prev.y + (s.curr.y - s.prev.y) * t) * CELL;
     const color = segColor(i, n);
+    const skinAlpha = CS.Skins.alpha(); // feature T17: ghost transparency
     const pad = isHead ? CELL * 0.06 : CELL * 0.07; // ~0.86..0.88 of a cell
     g.save();
     g.fillStyle = color;
     if (invulnTimer > 0) {
       // feature T8: the respawn shield blinks the whole snake
       g.globalAlpha = Math.max(0.08, 0.35 + 0.65 * Math.sin(animTime * 12));
+    } else if (skinAlpha < 1) {
+      g.globalAlpha = skinAlpha; // feature T17: the ghost skin
     }
     if (isHead) {
-      g.shadowColor = color;
+      // feature T17: the head glow follows the active skin (rainbow flows)
+      g.shadowColor = CS.Skins.headGlow(animTime);
       g.shadowBlur = 16;
     }
     roundRect(g, x + pad, y + pad, CELL - pad * 2, CELL - pad * 2, isHead ? 8 : 6);
