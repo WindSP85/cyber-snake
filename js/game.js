@@ -745,7 +745,20 @@
     if (box) box.classList.add('hidden');
   }
 
-  /* a qualifying score reveals the name input with the last used name */
+  /* inside Telegram the account username becomes the default nickname */
+  function telegramName() {
+    try {
+      const wa = window.Telegram && window.Telegram.WebApp;
+      const u = wa && wa.initDataUnsafe && wa.initDataUnsafe.user;
+      if (!u) return '';
+      return String(u.username || u.first_name || '').trim().slice(0, 20);
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /* a qualifying score reveals the name input with the last used name
+     (fallback: the Telegram account name) */
   function offerScoreSave() {
     const box = document.getElementById('score-save');
     if (!box) return;
@@ -757,7 +770,7 @@
       return;
     }
     const input = document.getElementById('player-name');
-    if (input) input.value = loadPlayerName();
+    if (input) input.value = loadPlayerName() || telegramName();
     box.classList.remove('hidden');
     if (input && typeof input.focus === 'function') input.focus();
   }
@@ -1997,6 +2010,16 @@
   function boot() {
     if (running) return;
     running = true;
+
+    // Telegram Mini App: сообщить о готовности и занять весь экран
+    // (вне Telegram window.Telegram отсутствует — безопасно игнорируется)
+    try {
+      const wa = window.Telegram && window.Telegram.WebApp;
+      if (wa && typeof wa.ready === 'function') wa.ready();
+      if (wa && typeof wa.expand === 'function') wa.expand();
+    } catch (e) {
+      /* not inside Telegram */
+    }
 
     canvas = document.getElementById('game-canvas');
     if (canvas) {

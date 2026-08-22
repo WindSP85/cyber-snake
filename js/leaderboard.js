@@ -17,7 +17,7 @@
   const CS = window.CS = window.CS || {};
 
   const MAX_ENTRIES = 10;      // board size
-  const NAME_MAX = 12;         // player name length limit
+  const NAME_MAX = 20;         // player name length limit
   const STORAGE_KEY = 'cs_board';
   const NET_TIMEOUT = 5000;    // feature T14: per-request budget, ms
 

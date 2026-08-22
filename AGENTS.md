@@ -23,7 +23,7 @@ node check-i18n.js
 
 ## Технические правила
 
-- Vanilla JS: IIFE, `'use strict'`, 2 пробела, единый неймспейс `window.CS`; никаких модулей, сборки, CDN.
+- Vanilla JS: IIFE, `'use strict'`, 2 пробела, единый неймспейс `window.CS`; никаких модулей, сборки, CDN. **Исключение:** официальный `https://telegram.org/js/telegram-web-app.js` — подключён в index.html; вне Telegram/офлайн он не загружается, а весь код проверяет `window.Telegram` перед использованием.
 - Без `console.log` в проде.
 - Игра обязана работать с `file://`: сетевые вызовы — только через `js/config.js` при заполненном облаке, всё в try/catch.
 - Порядок скриптов в index.html: `config → i18n → audio → bosses → fx → leaderboard → ui → game`.
