@@ -1,5 +1,5 @@
 /* ============================================================
-   NEON://SNAKE — game orchestrator (SPEC §2, §3, §4, §7, §11–§14, §20)
+   NEON://SNAKE — game orchestrator (SPEC §2, §3, §4, §7, §11–§14, §20, §21)
    CS.Game owns the state machine, the snake core, food/bonus,
    pickups, mystery containers and the tail bank, levels & speed,
    boss integration, the death sequence, input (keyboard + touch),
@@ -102,6 +102,13 @@
   const DAILY_CREAM_GROW = 2;       // 'cream': growth per food (base 1)
   const DAILY_DARK_R0 = 4;          // 'dark': fully visible radius, cells
   const DAILY_DARK_R1 = 7;          // 'dark': almost black by here, cells
+
+  /* feature T21: first-runs tutorial (SPEC §21) */
+  const TUT_RUNS = 2;               // hints live in the first 2 runs only
+  const TUT_MOVE_DELAY = 1;         // move hint after the run start, s
+  const TUT_FOOD_DELAY = 2.5;       // food hint after the move one, s
+  const TUT_DANGER_DELAY = 1.5;     // flash hint after the boss one, s
+  const IS_TOUCH = 'ontouchstart' in window; // swipe vs arrows wording
 
   /* weighted pickup types (SPEC §14 weights); 'life' is excluded
      while lives are full */
@@ -219,6 +226,12 @@
   let touchStart = null;
   let gestured = false;
 
+  /* feature T21: run counter + pending tutorial toasts (SPEC §21) */
+  let runs = loadRuns();             // started runs, persisted as cs_runs
+  let tutTimers = [];                // [{text, t}] — toasts pending in game time
+  let tutLifeShown = false;          // the ❤ hint fires once per run
+  let tutDangerShown = false;        // the flash hint fires once per run
+
   /* ---------- helpers ---------- */
 
   function key(x, y) { return x + ',' + y; }
@@ -243,6 +256,33 @@
     } catch (e) {
       /* storage unavailable: keep going without persistence */
     }
+  }
+
+  /* ---------- feature T21: run counter + tutorial queue ---------- */
+
+  function loadRuns() {
+    try {
+      const v = parseInt(window.localStorage.getItem('cs_runs'), 10);
+      return Number.isFinite(v) && v > 0 ? v : 0;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  /* every started run counts; the tutorial window is runs <= TUT_RUNS */
+  function bumpRuns() {
+    runs++;
+    try {
+      window.localStorage.setItem('cs_runs', String(runs));
+    } catch (e) {
+      /* storage unavailable: the counter lives until reload */
+    }
+  }
+
+  /* a tutorial toast fires after `delay` seconds of game time — a
+     pause holds the queue, leaving the run drops it */
+  function queueTut(text, delay) {
+    tutTimers.push({ text: text, t: delay });
   }
 
   /* feature T19: an upgrade value from CS.Upg (js/upgrades.js);
@@ -520,7 +560,14 @@
       if (lives < MAX_LIVES) lives++;
       updateLivesHud();
       CS.FX.burst(px, py, '#ff2d55', 14);
-      CS.UI.toast(tr('pLife'));
+      // feature T21: the first life pickup of the tutorial runs
+      // explains the stock instead of the plain "+1 LIFE"
+      if (runs <= TUT_RUNS && !tutLifeShown) {
+        tutLifeShown = true;
+        CS.UI.toast(tr('tutLife'));
+      } else {
+        CS.UI.toast(tr('pLife'));
+      }
       CS.Audio.sfx('life');
     } else if (p.type === 'mystery') { // feature T11
       applyMystery(px, py);
@@ -649,6 +696,12 @@
     CS.UI.bossBar(fight.hp, fight.maxHp, true, fight.name);
     lastBossHp = fight.hp;
     CS.UI.toast(tr('hintBoss')); // how to damage the boss — right when it matters
+    // feature T21: in the tutorial runs the white-flash warning
+    // follows the boss hint (the only boss-specific danger cue)
+    if (runs <= TUT_RUNS && !tutDangerShown) {
+      tutDangerShown = true;
+      queueTut(tr('tutDanger'), TUT_DANGER_DELAY);
+    }
   }
 
   function onBossDefeated() {
@@ -760,6 +813,7 @@
     debris = [];       // feature T9
     escaped = [];      // feature T11
     bank = null;       // feature T11
+    tutTimers = [];    // feature T21: no hints past the game over
     invulnTimer = 0;
     applySpeed();      // drop surge/slow multipliers from stepInterval
     renderEffectsHud();
@@ -1268,6 +1322,17 @@
     applyGridChange(); // feature T13: the field follows the current screen
     hideScoreSave();   // feature T10: a fresh run drops the save block
     CS.Ach.resetRun(); // feature T16: per-run achievement counters
+    // feature T21: count the run; the tutorial window is the first
+    // TUT_RUNS ones and every queued hint dies with the run
+    bumpRuns();
+    tutTimers = [];
+    tutLifeShown = false;
+    tutDangerShown = false;
+    if (runs === 1) {
+      // the very first run opens with the controls + food hints
+      queueTut(tr(IS_TOUCH ? 'tutMoveTouch' : 'tutMove'), TUT_MOVE_DELAY);
+      queueTut(tr('tutFood'), TUT_MOVE_DELAY + TUT_FOOD_DELAY);
+    }
     snake = [];
     const cx = Math.floor(GRID_W / 2);
     const cy = Math.floor(GRID_H / 2);
@@ -1340,6 +1405,7 @@
     debris = [];       // feature T9
     escaped = [];      // feature T11
     bank = null;       // feature T11
+    tutTimers = [];    // feature T21: leftover hints die with the run
     CS.Daily.stop();   // feature T20: leaving the field ends the challenge
     invulnTimer = 0;
     applySpeed();      // drop surge/slow multipliers from stepInterval
@@ -1455,6 +1521,11 @@
 
   function onKeyDown(e) {
     firstGesture();
+    // feature T21: a focused INPUT (the menu volume sliders, the name
+    // field) keeps its keystrokes — arrows/space steer the widget,
+    // not the snake; the page-scroll guard does not apply either
+    const target = e.target;
+    if (target && target.tagName === 'INPUT') return;
     const code = e.code || '';
     if (code.indexOf('Arrow') === 0 || code === 'Space') {
       if (e.preventDefault) e.preventDefault();
@@ -1560,6 +1631,15 @@
     }
 
     if (state === 'playing' || state === 'boss' || state === 'respawning') {
+      // feature T21: tutorial toasts tick in game time (a pause holds them)
+      for (let i = tutTimers.length - 1; i >= 0; i--) {
+        tutTimers[i].t -= dt;
+        if (tutTimers[i].t <= 0) {
+          CS.UI.toast(tutTimers[i].text);
+          tutTimers.splice(i, 1);
+        }
+      }
+
       if (bonus) {
         bonus.timer -= dt;
         if (bonus.timer <= 0) bonus = null;

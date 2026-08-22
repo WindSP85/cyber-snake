@@ -3,9 +3,11 @@
    Pure Web Audio synthesis: no files, no CDN, offline-first.
 
    Signal chain:
-     music layers -> musicBus (0.5, i.e. -6 dB vs SFX) --\
-                                                          >-- masterGain -> compressor -> destination
-     sfx voices   -> sfxBus (1.0) -----------------------/
+     music layers -> musicBus (music volume, feature T21) --\
+                                                             >-- masterGain -> compressor -> destination
+     sfx voices   -> sfxBus (sfx volume, feature T21) ------/
+
+   Mute is a master switch on top of both buses (SPEC §5, §21).
 
    Music: 16-step lookahead sequencer (setInterval 25 ms,
    horizon 0.12 s), A-minor / pentatonic, layered per mode
@@ -24,7 +26,10 @@
   const TICK_MS = 25;      /* scheduler interval */
   const HORIZON = 0.12;    /* scheduling horizon, seconds */
   const MASTER_VOL = 0.85;
-  const MUSIC_VOL = 0.5;   /* music sits -6 dB under SFX */
+  /* feature T21: per-bus volume defaults (0..1), persisted as
+     cs_mvol / cs_svol; music's 0.5 keeps it -6 dB under the SFX */
+  const DEFAULT_MUSIC_VOL = 0.5;
+  const DEFAULT_SFX_VOL = 0.8;
 
   /* midi -> Hz */
   const NOTE = function (midi) { return 440 * Math.pow(2, (midi - 69) / 12); };
@@ -107,6 +112,10 @@
   let noiseBuf = null;       /* shared white-noise buffer */
 
   let muted = readMuted();
+  /* feature T21: per-bus volumes (0..1); applied at buildGraph() time
+     when the values were set before ensure(), live otherwise */
+  let musicVol = readVol('cs_mvol', DEFAULT_MUSIC_VOL);
+  let sfxVol = readVol('cs_svol', DEFAULT_SFX_VOL);
 
   let currentMode = null;    /* 'menu' | 'game' | 'boss' | null */
   let timerId = 0;           /* scheduler interval handle */
@@ -126,6 +135,25 @@
     } catch (e) {
       return false;
     }
+  }
+
+  /* feature T21: a persisted 0..1 volume with a fallback default */
+  function readVol(storageKey, fallback) {
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw === null || raw === undefined) return fallback;
+      const v = parseFloat(raw);
+      if (Number.isFinite(v)) return Math.max(0, Math.min(1, v));
+    } catch (e) {
+      /* storage unavailable: keep the default */
+    }
+    return fallback;
+  }
+
+  function clampVol(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, Math.min(1, n));
   }
 
   /* ---------- graph ---------- */
@@ -163,11 +191,11 @@
     comp.connect(ctx.destination);
 
     sfxBus = ctx.createGain();
-    sfxBus.gain.value = 1;
+    sfxBus.gain.value = sfxVol; // feature T21
     sfxBus.connect(masterGain);
 
     musicBus = ctx.createGain();
-    musicBus.gain.value = MUSIC_VOL;
+    musicBus.gain.value = musicVol; // feature T21
     musicBus.connect(masterGain);
 
     padGain = layerGain(0.4);
@@ -865,7 +893,7 @@
       arpIdx = 0;
       padKey = '';
       const now = ctx.currentTime;
-      try { musicBus.gain.setTargetAtTime(MUSIC_VOL, now, 0.05); } catch (e) { /* noop */ }
+      try { musicBus.gain.setTargetAtTime(musicVol, now, 0.05); } catch (e) { /* noop */ }
       if (timerId) {
         /* already running: land the new mode on the next step */
         nextStepTime = Math.max(nextStepTime, now + 0.03);
@@ -901,6 +929,44 @@
 
     getMuted: function () {
       return muted;
+    },
+
+    /* feature T21 (SPEC §21): separate music volume, 0..1. The value
+       is remembered even before ensure() and lands on musicBus when
+       the context exists; music stopped by music(null) stays silent —
+       the bus is re-ramped by the next music() call. Mute stays a
+       master switch on top of this. */
+    setMusicVol: function (v) {
+      musicVol = clampVol(v);
+      try {
+        window.localStorage.setItem('cs_mvol', String(musicVol));
+      } catch (e) { /* storage unavailable */ }
+      if (ctx && musicBus && currentMode) {
+        try {
+          musicBus.gain.setTargetAtTime(musicVol, ctx.currentTime, 0.02);
+        } catch (e) { /* noop */ }
+      }
+    },
+
+    getMusicVol: function () {
+      return musicVol;
+    },
+
+    /* feature T21 (SPEC §21): separate SFX volume, 0..1 — sfxBus. */
+    setSfxVol: function (v) {
+      sfxVol = clampVol(v);
+      try {
+        window.localStorage.setItem('cs_svol', String(sfxVol));
+      } catch (e) { /* storage unavailable */ }
+      if (ctx && sfxBus) {
+        try {
+          sfxBus.gain.setTargetAtTime(sfxVol, ctx.currentTime, 0.02);
+        } catch (e) { /* noop */ }
+      }
+    },
+
+    getSfxVol: function () {
+      return sfxVol;
     }
   };
 })();

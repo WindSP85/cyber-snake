@@ -67,6 +67,17 @@
           <button id="btn-upg" class="btn" type="button" data-i18n="upg">Апгрейды</button>
           <button id="btn-lang" class="btn" type="button" title="Language">🌐</button>
         </div>
+        <!-- feature T21: separate music / sfx volume (cs_mvol / cs_svol) -->
+        <div id="volume-box" class="volume-box">
+          <div class="volume-row">
+            <label class="volume-label" for="vol-music" data-i18n="volMusic">МУЗЫКА</label>
+            <input id="vol-music" class="volume-slider" type="range" min="0" max="100" step="1" value="50">
+          </div>
+          <div class="volume-row">
+            <label class="volume-label" for="vol-sfx" data-i18n="volSfx">ЗВУКИ</label>
+            <input id="vol-sfx" class="volume-slider" type="range" min="0" max="100" step="1" value="80">
+          </div>
+        </div>
         <!-- feature T20: "ЧЕЛЛЕНДЖ ДНЯ: <название> · Сегодня: N" (game.js fills it) -->
         <p id="daily-line" class="daily-line"></p>
         <p class="hint" data-i18n="hintMenu">Enter — старт · M — звук</p>

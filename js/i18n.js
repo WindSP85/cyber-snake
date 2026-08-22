@@ -179,7 +179,15 @@
       dCreamD: 'еда ×2 очков, но рост вдвое',
       dDarkD: 'видно только у головы',
       dHuntD: 'тайны чаще, вирусы злее',
-      seasonBadge: 'СЕЗОН: {1}'
+      seasonBadge: 'СЕЗОН: {1}',
+      /* feature T21: volume sliders + first-runs tutorial (SPEC §21) */
+      volMusic: 'МУЗЫКА',
+      volSfx: 'ЗВУКИ',
+      tutMove: 'СТРЕЛКИ — ДВИЖЕНИЕ',
+      tutMoveTouch: 'СВАЙП — ДВИЖЕНИЕ',
+      tutFood: 'ЕДА РАСТЁТ',
+      tutDanger: 'БЕЛЫЕ ВСПЫШКИ = ОПАСНОСТЬ',
+      tutLife: '❤ — ЗАПАСНАЯ ЖИЗНЬ'
     },
     en: {
       langTitle: 'SELECT LANGUAGE',
@@ -345,7 +353,15 @@
       dCreamD: 'food ×2 points, double growth',
       dDarkD: 'you only see near the head',
       dHuntD: 'more mysteries, meaner viruses',
-      seasonBadge: 'SEASON: {1}'
+      seasonBadge: 'SEASON: {1}',
+      /* feature T21: volume sliders + first-runs tutorial (SPEC §21) */
+      volMusic: 'MUSIC',
+      volSfx: 'SFX',
+      tutMove: 'ARROWS TO MOVE',
+      tutMoveTouch: 'SWIPE TO MOVE',
+      tutFood: 'FOOD MAKES YOU GROW',
+      tutDanger: 'WHITE FLASHES = DANGER',
+      tutLife: '❤ — SPARE LIFE'
     }
   };
 

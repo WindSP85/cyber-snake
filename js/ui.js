@@ -397,6 +397,42 @@
     return CS.I18N && typeof CS.I18N.t === 'function' ? CS.I18N.t(key, arg) : key;
   }
 
+  /* ---------- feature T21: menu volume sliders (SPEC §21) ---------- */
+
+  /* slider position <- CS.Audio volume (0..1 -> 0..100) */
+  function syncVolumeSliders() {
+    const music = byId('vol-music');
+    const sfx = byId('vol-sfx');
+    if (music && CS.Audio && typeof CS.Audio.getMusicVol === 'function') {
+      music.value = String(Math.round(CS.Audio.getMusicVol() * 100));
+    }
+    if (sfx && CS.Audio && typeof CS.Audio.getSfxVol === 'function') {
+      sfx.value = String(Math.round(CS.Audio.getSfxVol() * 100));
+    }
+  }
+
+  /* the sliders live only in the menu panel (hidden with it on every
+     other screen); each input event applies + persists the volume */
+  function wireVolumeSliders() {
+    const music = byId('vol-music');
+    const sfx = byId('vol-sfx');
+    syncVolumeSliders();
+    if (music) {
+      music.addEventListener('input', function () {
+        if (CS.Audio && typeof CS.Audio.setMusicVol === 'function') {
+          CS.Audio.setMusicVol(Number(music.value) / 100);
+        }
+      });
+    }
+    if (sfx) {
+      sfx.addEventListener('input', function () {
+        if (CS.Audio && typeof CS.Audio.setSfxVol === 'function') {
+          CS.Audio.setSfxVol(Number(sfx.value) / 100);
+        }
+      });
+    }
+  }
+
   function updateMuteLabel() {
     const btn = byId('mute-btn');
     if (!btn) return;
@@ -538,6 +574,7 @@
   function init() {
     wire();
     updateMuteLabel();
+    wireVolumeSliders(); // feature T21: menu music/sfx sliders
     CS.UI.hud({ best: loadBest() });
   }
 
