@@ -1097,6 +1097,14 @@
       return live;
     },
 
+    /* feature T24 (SPEC §22): the lobby ui saw the rival's presence
+       drop — end the live match as 'aborted' right now (the same
+       path as the guest's transport-silence timeout); after a match
+       end this is a safe no-op */
+    abort: function () {
+      if (live) rivalLeft();
+    },
+
     /* steer MY snake: host queues directly, guest broadcasts */
     input: function (d) {
       if (!live) return;

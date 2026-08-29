@@ -1716,3 +1716,261 @@ body.in-telegram .tg-only {
     letter-spacing: 1px;
   }
 }
+
+/* ============================================================
+   Feature T24: online duel lobby + result screen (SPEC §22)
+   ============================================================ */
+
+/* the two lobby blocks (create / join) stack in one column */
+.duel-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.duel-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(0, 240, 255, .65);
+}
+
+.duel-join-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+/* the 4-char code input: wide mono letters, always uppercase */
+.duel-code-input {
+  width: 158px;
+  padding: 10px 6px 10px 14px;
+  font-family: var(--font);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  text-align: center;
+  text-transform: uppercase;
+  color: #eafcff;
+  background: rgba(4, 5, 12, .9);
+  border: 1px solid rgba(0, 240, 255, .7);
+  box-shadow:
+    0 0 10px rgba(0, 240, 255, .18),
+    inset 0 0 8px rgba(0, 240, 255, .08);
+  outline: none;
+  transition: border-color .18s, box-shadow .18s;
+}
+
+.duel-code-input:focus {
+  border-color: var(--cyan);
+  box-shadow:
+    0 0 18px rgba(0, 240, 255, .45),
+    inset 0 0 10px rgba(0, 240, 255, .12);
+}
+
+/* the created room block */
+.duel-room {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  margin: 0 0 16px;
+}
+
+/* the room code: one HUGE letter per yellow plate */
+.duel-code {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.duel-char {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: clamp(52px, 12vw, 84px);
+  height: clamp(64px, 15vw, 104px);
+  font-size: clamp(40px, 9vw, 72px);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--yellow);
+  background: rgba(4, 5, 12, .7);
+  border: 1px solid rgba(255, 230, 0, .7);
+  text-shadow: 0 0 18px rgba(255, 230, 0, .7);
+  box-shadow:
+    0 0 18px rgba(255, 230, 0, .2),
+    inset 0 0 14px rgba(255, 230, 0, .07);
+}
+
+/* the deep-link line under the code */
+.duel-link {
+  margin: 0;
+  max-width: 100%;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: rgba(215, 247, 255, .6);
+  word-break: break-all;
+  user-select: all;
+}
+
+.duel-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* the «СКОПИРОВАНО» flash next to the copy button */
+.duel-copied {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--green);
+  text-shadow: 0 0 8px rgba(0, 255, 157, .5);
+}
+
+/* clipboard fallback: the link, revealed pre-selected */
+.duel-link-copy {
+  width: min(340px, 80vw);
+  padding: 8px 10px;
+  font-family: var(--font);
+  font-size: 11px;
+  color: #eafcff;
+  background: rgba(4, 5, 12, .9);
+  border: 1px solid rgba(0, 240, 255, .7);
+  outline: none;
+}
+
+/* the waiting status: ХОСТ/ГОСТЬ · ждём соперника… + live dots */
+.duel-wait {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(0, 240, 255, .5);
+}
+
+.duel-role {
+  color: var(--magenta);
+  text-shadow: 0 0 10px rgba(255, 43, 214, .5);
+}
+
+.duel-role::after {
+  content: '·';
+  margin-left: 8px;
+  color: rgba(215, 247, 255, .4);
+  text-shadow: none;
+}
+
+.duel-dots i {
+  font-style: normal;
+  animation: duel-dot 1.2s infinite;
+}
+
+.duel-dots i:nth-child(2) {
+  animation-delay: .2s;
+}
+
+.duel-dots i:nth-child(3) {
+  animation-delay: .4s;
+}
+
+@keyframes duel-dot {
+  0%, 60%, 100% {
+    opacity: .15;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+/* the inline network error strip (duelErr*) */
+.duel-error {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--danger);
+  background: rgba(255, 45, 85, .06);
+  border: 1px solid rgba(255, 45, 85, .6);
+  text-shadow: 0 0 8px rgba(255, 45, 85, .4);
+}
+
+/* ---------- the result screen ---------- */
+
+/* the big «2:1» score */
+.duel-score {
+  margin: 0 0 22px;
+  font-size: clamp(40px, 9vw, 72px);
+  font-weight: 700;
+  letter-spacing: 10px;
+  color: var(--yellow);
+  text-shadow: 0 0 24px rgba(255, 230, 0, .5);
+}
+
+/* result title colors: win = green, loss/left = red, draw = yellow */
+.duel-res-win {
+  color: var(--green);
+  text-shadow: 0 0 12px rgba(0, 255, 157, .6);
+}
+
+.duel-res-loss,
+.duel-res-left {
+  color: var(--danger);
+  text-shadow: 0 0 12px rgba(255, 45, 85, .6);
+}
+
+.duel-res-left {
+  animation: danger-pulse 1.6s infinite;
+}
+
+/* the pressed «РЕВАНШ» waits dimmed («ждём соперника…») */
+.btn.dim {
+  color: rgba(215, 247, 255, .4);
+  border-color: rgba(0, 240, 255, .25);
+  background: rgba(0, 240, 255, .02);
+  text-shadow: none;
+  box-shadow: none;
+  cursor: default;
+}
+
+.btn.dim:hover,
+.btn.dim:focus-visible {
+  background: rgba(0, 240, 255, .02);
+  box-shadow: none;
+  outline: none;
+}
+
+@media (max-width: 640px) {
+  .duel-code {
+    gap: 8px;
+  }
+
+  .duel-code-input {
+    width: 138px;
+    font-size: 18px;
+    letter-spacing: 6px;
+  }
+
+  .duel-join-row {
+    flex-direction: column;
+    align-items: center;
+  }
+}

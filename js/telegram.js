@@ -83,23 +83,41 @@
       const text = CS.I18N && typeof CS.I18N.t === 'function'
         ? CS.I18N.t('shareText', score)
         : String(score);
-      const url = SHARE_BASE + encodeURIComponent(APP_LINK) +
-        '&text=' + encodeURIComponent(text);
-      const wa = webApp();
-      if (wa && typeof wa.openTelegramLink === 'function') {
-        wa.openTelegramLink(url);
-        return;
-      }
-      window.open(url, '_blank');
+      openShare(SHARE_BASE + encodeURIComponent(APP_LINK) +
+        '&text=' + encodeURIComponent(text));
     } catch (e) {
       /* sharing is optional: ignore any failure */
     }
+  }
+
+  /* feature T24 (SPEC §22): share an arbitrary link with an arbitrary
+     text — the duel invite carries the room deep link instead of the
+     plain app link */
+  function shareLink(link, text) {
+    try {
+      openShare(SHARE_BASE + encodeURIComponent(String(link)) +
+        '&text=' + encodeURIComponent(String(text)));
+    } catch (e) {
+      /* sharing is optional: ignore any failure */
+    }
+  }
+
+  /* the single share door: the Telegram bridge inside the Mini App,
+     a new tab everywhere else */
+  function openShare(url) {
+    const wa = webApp();
+    if (wa && typeof wa.openTelegramLink === 'function') {
+      wa.openTelegramLink(url);
+      return;
+    }
+    window.open(url, '_blank');
   }
 
   CS.TG = {
     init: init,
     haptic: haptic,
     shareScore: shareScore,
+    shareLink: shareLink,
     isTelegram: isTelegram
   };
 })();

@@ -7,7 +7,8 @@
 
   const CS = window.CS = window.CS || {};
 
-  const SCREENS = ['lang', 'menu', 'controls', 'board', 'ach', 'skins', 'upg', 'pause', 'gameover'];
+  // feature T24: 'duel' (the lobby) + 'duelresult' (the match result)
+  const SCREENS = ['lang', 'menu', 'controls', 'board', 'ach', 'skins', 'upg', 'pause', 'gameover', 'duel', 'duelresult'];
   const TOAST_MS = 1600;
   const CLEAR_CONFIRM_MS = 3000; // feature T10: "Sure?" arming window
   const HANDLER_KEYS = ['start', 'resume', 'restart', 'menu', 'mute', 'lang', 'save'];

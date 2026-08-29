@@ -1439,6 +1439,10 @@
 
   function goMenu() {
     stopDuelIfActive(); // feature T23: leaving through the menu ends the duel
+    // feature T24 (SPEC §22): the menu also drops the duel room and
+    // resets the lobby — every path out of a duel cleans the channel
+    if (CS.Net && typeof CS.Net.leave === 'function') CS.Net.leave();
+    if (CS.DuelUI && typeof CS.DuelUI.reset === 'function') CS.DuelUI.reset();
     state = 'menu';
     fight = null;
     pendingBoss = 0;
@@ -2435,6 +2439,12 @@
     CS.UI.hud({ score: 0, best: best, level: 1 });
     CS.UI.show('lang'); // language selection on every entry (feature T7)
     state = 'menu';
+    // feature T24 (SPEC §22): a room-XXXX Telegram deep link opens the
+    // duel lobby (the code pre-filled + an auto-join) instead of the
+    // language picker — the rival is already waiting in that room
+    if (CS.DuelUI && typeof CS.DuelUI.bootDeepLink === 'function') {
+      CS.DuelUI.bootDeepLink();
+    }
     CS.Audio.music('menu'); // silently ignored until the first gesture
 
     lastTs = 0;
