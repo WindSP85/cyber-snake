@@ -187,7 +187,18 @@
       tutMoveTouch: 'СВАЙП — ДВИЖЕНИЕ',
       tutFood: 'ЕДА РАСТЁТ',
       tutDanger: 'БЕЛЫЕ ВСПЫШКИ = ОПАСНОСТЬ',
-      tutLife: '❤ — ЗАПАСНАЯ ЖИЗНЬ'
+      tutLife: '❤ — ЗАПАСНАЯ ЖИЗНЬ',
+      /* feature T23: online duel (SPEC §22) */
+      dRoundScore: 'ВЫ {1} : {2} СОПЕРНИК',
+      dEat: 'СОПЕРНИК СЪЕДЕН!',
+      dTrapped: 'ЗАКОЛЬЦОВАН!',
+      dHead: 'ЛОБ-В-ЛОБ',
+      dCrash: 'АВАРИЯ!',
+      dWin: 'ПОБЕДА!',
+      dLose: 'ПОРАЖЕНИЕ',
+      dDraw: 'НИЧЬЯ',
+      dLeft: 'СОПЕРНИК ПОКИНУЛ БОЙ',
+      dReady: 'БОЙ!'
     },
     en: {
       langTitle: 'SELECT LANGUAGE',
@@ -361,7 +372,18 @@
       tutMoveTouch: 'SWIPE TO MOVE',
       tutFood: 'FOOD MAKES YOU GROW',
       tutDanger: 'WHITE FLASHES = DANGER',
-      tutLife: '❤ — SPARE LIFE'
+      tutLife: '❤ — SPARE LIFE',
+      /* feature T23: online duel (SPEC §22) */
+      dRoundScore: 'YOU {1} : {2} RIVAL',
+      dEat: 'RIVAL DEVOURED!',
+      dTrapped: 'TRAPPED!',
+      dHead: 'HEAD-ON',
+      dCrash: 'CRASHED!',
+      dWin: 'VICTORY!',
+      dLose: 'DEFEAT',
+      dDraw: 'DRAW',
+      dLeft: 'RIVAL LEFT THE DUEL',
+      dReady: 'FIGHT!'
     }
   };
 

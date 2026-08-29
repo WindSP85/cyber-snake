@@ -5,9 +5,11 @@
    boss integration, the death sequence, input (keyboard + touch),
    the main rAF loop and the best score.
 
-   States: 'menu' | 'playing' | 'boss' | 'paused' | 'gameover'
+   States: 'menu' | 'playing' | 'boss' | 'paused' | 'gameover' | 'duel'
    plus the internal 'dying' (1 s freeze before the game over) and
    'respawning' (feature T8: a spent life reboots the snake).
+   'duel' (feature T23) delegates the whole world to CS.Duel
+   (js/duel.js) — the solo states never run alongside it.
    ============================================================ */
 (function () {
   'use strict';
@@ -1312,7 +1314,47 @@
 
   /* ---------- state transitions ---------- */
 
+  /* feature T23 (SPEC §22): duel lifecycle. CS.Game.startDuel(opts)
+     is the T24 ui entry point: opts pass straight into
+     CS.Duel.begin({host, myIndex, onMatchEnd}); endDuel() returns
+     to the menu. A duel can never be paused (SPEC §22). */
+  function stopDuelIfActive() {
+    if (CS.Duel && typeof CS.Duel.active === 'function' && CS.Duel.active()) {
+      CS.Duel.stop();
+      restoreSoloCanvas();
+    }
+  }
+
+  function startDuel(opts) {
+    if (!CS.Duel || typeof CS.Duel.begin !== 'function') return false;
+    stopDuelIfActive();
+    hideScoreSave();
+    fight = null;
+    pendingBoss = 0;
+    bannerTimer = 0;
+    pickups = [];
+    effects = [];
+    debris = [];
+    escaped = [];
+    bank = null;
+    tutTimers = [];
+    invulnTimer = 0;
+    applySpeed();
+    renderEffectsHud();
+    CS.UI.bossBar(0, 0, false);
+    CS.UI.banner(null, false);
+    state = 'duel';
+    CS.Duel.begin(opts);
+    return true;
+  }
+
+  function endDuel() {
+    stopDuelIfActive();
+    goMenu();
+  }
+
   function startGame(opts) {
+    stopDuelIfActive(); // feature T23: a solo run always leaves the duel
     // feature T20: {daily:true} runs the day challenge — the modifier
     // flag lives in CS.Daily from here until the run ends (death or
     // leaving to the menu); every other start is a normal run
@@ -1396,6 +1438,7 @@
   }
 
   function goMenu() {
+    stopDuelIfActive(); // feature T23: leaving through the menu ends the duel
     state = 'menu';
     fight = null;
     pendingBoss = 0;
@@ -1519,6 +1562,16 @@
     dirQueue.push(d);
   }
 
+  /* feature T23: direction input goes either to the solo queue or
+     to the live duel (CS.Duel validates/buffers it on its side) */
+  function steer(d) {
+    if (state === 'duel') {
+      if (CS.Duel && CS.Duel.active()) CS.Duel.input(d);
+      return;
+    }
+    queueDir(d);
+  }
+
   function onKeyDown(e) {
     firstGesture();
     // feature T21: a focused INPUT (the menu volume sliders, the name
@@ -1536,7 +1589,7 @@
     else if (code === 'ArrowLeft' || code === 'KeyA') d = DIR.left;
     else if (code === 'ArrowRight' || code === 'KeyD') d = DIR.right;
     if (d) {
-      queueDir(d);
+      steer(d); // feature T23: duel input branches here
       return;
     }
     if (code === 'Space' || code === 'Escape') {
@@ -1579,8 +1632,8 @@
       if (state === 'menu' || state === 'gameover') startGame();
       return;
     }
-    if (adx > ady) queueDir(dx > 0 ? DIR.right : DIR.left);
-    else queueDir(dy > 0 ? DIR.down : DIR.up);
+    if (adx > ady) steer(dx > 0 ? DIR.right : DIR.left); // feature T23: duel too
+    else steer(dy > 0 ? DIR.down : DIR.up);
   }
 
   function onCanvasClick() {
@@ -1628,6 +1681,13 @@
     for (let i = dmgPops.length - 1; i >= 0; i--) {
       dmgPops[i].t -= dt;
       if (dmgPops[i].t <= 0) dmgPops.splice(i, 1);
+    }
+
+    /* feature T23: the duel owns the world in this state — the solo
+       state machine below stays completely untouched */
+    if (state === 'duel') {
+      if (CS.Duel && CS.Duel.active()) CS.Duel.update(dt);
+      return;
     }
 
     if (state === 'playing' || state === 'boss' || state === 'respawning') {
@@ -1705,6 +1765,13 @@
 
   function render() {
     if (!g) return;
+    /* feature T23: the duel paints its own arena on the same canvas;
+       the FX layer stays on top of it like everywhere else */
+    if (state === 'duel') {
+      if (CS.Duel && CS.Duel.active()) CS.Duel.draw(g);
+      CS.FX.draw(g);
+      return;
+    }
     const W = GRID_W * CELL;
     const H = GRID_H * CELL;
 
@@ -2185,6 +2252,44 @@
     return true;
   }
 
+  /* ---------- feature T23 (SPEC §22): the duel arena ---------- */
+
+  /* The duel field keeps the computeGrid proportions but doubles
+     the area (~42x28 on desktop, ~x1.6 on phones): the same aspect
+     clamp and screen reserve, CELLS = 1200 instead of 600. */
+  function computeDuelGrid() {
+    const portrait = window.innerHeight > window.innerWidth * 1.15;
+    const reserve = portrait ? 360 : 90;
+    const availH = Math.max(200, window.innerHeight - reserve);
+    const aspect = Math.max(0.55, Math.min(1.5, window.innerWidth / availH));
+    const CELLS = 1200;
+    let w = Math.round(Math.sqrt(CELLS * aspect));
+    let h = Math.round(Math.sqrt(CELLS / aspect));
+    w = Math.max(18, Math.min(46, w));
+    h = Math.max(18, Math.min(46, h));
+    return { w: w, h: h };
+  }
+
+  /* The duel canvas swap: the same backing-store rules as the solo
+     field, applied to the duel dimensions CS.Duel asked for. */
+  function resizeDuelCanvas(w, h) {
+    if (!canvas || !g) return;
+    const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    CS.FX.setSize(w, h);
+    cssVars(w / CELL, h / CELL);
+  }
+
+  /* Leaving a duel: force the solo canvas back — GRID_W/GRID_H did
+     not change, so applyGridChange() alone would be a no-op here */
+  function restoreSoloCanvas() {
+    resizeCanvas();
+    CS.FX.setSize(GRID_W * CELL, GRID_H * CELL);
+    cssVars();
+  }
+
   /* Canvas backing store for the current grid. HiDPI: the backstore is
      scaled by devicePixelRatio, all modules keep drawing in logical
      GRID_W*CELL x GRID_H*CELL coordinates via setTransform */
@@ -2196,11 +2301,15 @@
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  /* The stage ratio follows the live grid (css sizes .layout/.stage) */
-  function cssVars() {
+  /* The stage ratio follows the live grid (css sizes .layout/.stage);
+     feature T23: the duel passes its own dimensions while it owns
+     the canvas, every other caller keeps the solo grid */
+  function cssVars(w, h) {
     if (!document.documentElement || !document.documentElement.style) return;
-    document.documentElement.style.setProperty('--field-ratio', GRID_W + ' / ' + GRID_H);
-    document.documentElement.style.setProperty('--field-aspect', String(GRID_W / GRID_H));
+    const fw = Number.isFinite(w) ? w : GRID_W;
+    const fh = Number.isFinite(h) ? h : GRID_H;
+    document.documentElement.style.setProperty('--field-ratio', fw + ' / ' + fh);
+    document.documentElement.style.setProperty('--field-aspect', String(fw / fh));
   }
 
   /* One grid change = canvas + fx + css all in sync */
@@ -2247,6 +2356,17 @@
     CS.FX.setSize(GRID_W * CELL, GRID_H * CELL);
     cssVars();
     window.addEventListener('resize', onWindowResize);
+
+    // feature T23 (SPEC §22): duel core injection — the arena size
+    // provider (x2 area) and the canvas swap hook; without js/duel.js
+    // everything below runs exactly as before
+    if (CS.Duel && typeof CS.Duel.init === 'function') {
+      CS.Duel.init({
+        cell: CELL,
+        grid: computeDuelGrid,
+        hooks: { resize: resizeDuelCanvas }
+      });
+    }
 
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('pointerdown', function () { firstGesture(); });
@@ -2374,7 +2494,8 @@
     };
   }
 
-  CS.Game = { boot: boot };
+  /* feature T23 (SPEC §22): the duel entries the T24 ui calls */
+  CS.Game = { boot: boot, startDuel: startDuel, endDuel: endDuel };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', boot);

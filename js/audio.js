@@ -849,6 +849,88 @@
         const sg = mkGain(tt, 0.05, dur + 0.25, 0.05);
         sh.connect(sg); sg.connect(sfxBus); reg(sh, [sg]);
       });
+    },
+
+    /* feature T23 (SPEC §22): duel countdown beep — one clean blip */
+    duelCount: function (t) {
+      const o = mkOsc('square', 620, t, t + 0.12);
+      const g = mkGain(t, 0.2, 0.1);
+      o.connect(g); g.connect(sfxBus); reg(o, [g]);
+    },
+
+    /* feature T23: duel start — two rising notes + a noise snap */
+    duelGo: function (t) {
+      [[55, 0, 0.1], [67, 0.1, 0.26]].forEach(function (n) {
+        const tt = t + n[1];
+        const o = mkOsc('square', NOTE(n[0]), tt, tt + n[2] + 0.05);
+        const g = mkGain(tt, 0.22, n[2]);
+        o.connect(g); g.connect(sfxBus); reg(o, [g]);
+      });
+      const n2 = mkNoise(t + 0.1, t + 0.3);
+      const f = mkFilter('highpass', 3000, t + 0.1);
+      const ng = mkGain(t + 0.1, 0.12, 0.18);
+      n2.connect(f); f.connect(ng); ng.connect(sfxBus); reg(n2, [f, ng]);
+    },
+
+    /* feature T23: match victory fanfare — a 5-note major ladder,
+       every note trailed by a soft octave-up shimmer */
+    duelWin: function (t) {
+      [60, 64, 67, 72, 76].forEach(function (m, i) {
+        const tt = t + i * 0.11;
+        const dur = i === 4 ? 0.6 : 0.16;
+        const o = mkOsc('square', NOTE(m), tt, tt + dur + 0.05);
+        const g = mkGain(tt, 0.2, dur);
+        o.connect(g); g.connect(sfxBus); reg(o, [g]);
+        const sh = mkOsc('sine', NOTE(m) * 2, tt, tt + dur + 0.2);
+        const sg = mkGain(tt, 0.05, dur + 0.15, 0.04);
+        sh.connect(sg); sg.connect(sfxBus); reg(sh, [sg]);
+      });
+    },
+
+    /* feature T23: match defeat — two sinking saws + a sub drop */
+    duelLose: function (t) {
+      [[57, 0, 0.3], [50, 0.28, 0.6]].forEach(function (n) {
+        const tt = t + n[1];
+        const o = mkOsc('sawtooth', NOTE(n[0]), tt, tt + n[2] + 0.05);
+        o.frequency.linearRampToValueAtTime(NOTE(n[0]) * 0.94, tt + n[2]);
+        const g = mkGain(tt, 0.2, n[2]);
+        o.connect(g); g.connect(sfxBus); reg(o, [g]);
+      });
+      const sub = mkOsc('sine', 110, t + 0.28, t + 0.95);
+      sub.frequency.exponentialRampToValueAtTime(38, t + 0.9);
+      const sg = mkGain(t + 0.28, 0.35, 0.62);
+      sub.connect(sg); sg.connect(sfxBus); reg(sub, [sg]);
+    },
+
+    /* feature T23: body bite — a noise crunch + a falling zap */
+    duelBite: function (t) {
+      const n = mkNoise(t, t + 0.2);
+      const f = mkFilter('bandpass', 2400, t, 1.6);
+      f.frequency.exponentialRampToValueAtTime(300, t + 0.18);
+      const ng = mkGain(t, 0.34, 0.18);
+      n.connect(f); f.connect(ng); ng.connect(sfxBus); reg(n, [f, ng]);
+      const o = mkOsc('square', 900, t, t + 0.16);
+      o.frequency.exponentialRampToValueAtTime(150, t + 0.14);
+      const g = mkGain(t, 0.22, 0.15);
+      o.connect(g); g.connect(sfxBus); reg(o, [g]);
+    },
+
+    /* feature T23: the noose — three tightening ticks + a low thud */
+    duelTrap: function (t) {
+      [0, 0.12, 0.24].forEach(function (off, i) {
+        const tt = t + off;
+        const o = mkOsc('square', 300 + i * 190, tt, tt + 0.09);
+        const g = mkGain(tt, 0.2, 0.08);
+        o.connect(g); g.connect(sfxBus); reg(o, [g]);
+        const n = mkNoise(tt, tt + 0.07);
+        const f = mkFilter('bandpass', 900 + i * 700, tt, 2.4);
+        const ng = mkGain(tt, 0.14, 0.06);
+        n.connect(f); f.connect(ng); ng.connect(sfxBus); reg(n, [f, ng]);
+      });
+      const sub = mkOsc('sine', 130, t + 0.3, t + 0.75);
+      sub.frequency.exponentialRampToValueAtTime(45, t + 0.7);
+      const sg = mkGain(t + 0.3, 0.32, 0.4);
+      sub.connect(sg); sg.connect(sfxBus); reg(sub, [sg]);
     }
   };
 
