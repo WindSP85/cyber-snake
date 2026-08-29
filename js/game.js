@@ -204,6 +204,11 @@
   let pendingBoss = 0;              // boss index waiting for the current fight
   let lastBossHp = -1;
   let dmgPops = [];                 // floating "-1" hit markers over the boss core
+  let hitStop = 0;                  // batch3: micro-freeze on big events, s
+  let softStart = 0;                // batch3: seconds of the gentle launch ramp
+  let dangerT = 0;                  // batch3: smoothed wall-danger 0..1
+  let dangerCache = null;           // batch3: offscreen red edge vignette
+  let dangerSig = '';               // batch3: its size signature
 
   /* feature T8: pickups, timed effects, lives, respawn */
   let pickups = [];                 // [{x,y,type,timer}]
@@ -707,6 +712,7 @@
   }
 
   function onBossDefeated() {
+    hitStop = 0.1; // batch3: weighty moment
     const idx = fight ? fight.bossIndex : 1;
     addScore(BOSS_SCORE * idx);
     CS.Ach.event('bossDown'); // feature T16: all-time kill counter
@@ -1004,6 +1010,7 @@
     const kind = forced || rollMystery();
     CS.Ach.event('mystery'); // feature T16: every container counts
     if (kind === 'jackpot') {
+      hitStop = 0.07; // batch3: jackpot punch
       addScore(MYSTERY_JACKPOT);
       CS.Ach.event('jackpot'); // feature T16
       CS.TG.haptic('heavy'); // feature T15: the jackpot slams
@@ -1394,6 +1401,9 @@
     pendingBoss = 0;
     bannerTimer = 0;
     stepTimer = 0;
+    hitStop = 0;   // batch3
+    dangerT = 0;   // batch3
+    softStart = 10; // batch3: gentle launch ramp
     pickups = [];      // feature T8
     effects = [];
     debris = [];       // feature T9
@@ -1673,6 +1683,12 @@
 
   function update(dt) {
     animTime += dt;
+    // batch3: hit-stop — a micro-freeze makes big events feel weighty
+    if (hitStop > 0) {
+      hitStop -= dt;
+      dt *= 0.06;
+    }
+    if (softStart > 0) softStart -= dt;
     CS.FX.update(dt);
 
     // feature T8: the effects DOM is refreshed on a coarse timer
@@ -1742,7 +1758,19 @@
         if (fight && fight.active && checkHazards()) return;
       }
 
-      stepTimer += dt;
+      // batch3: the first 10 s run ~15% slower with a smooth ramp — a soft
+      // landing for newcomers; veterans lose under two ticks in total
+      stepTimer += dt * (softStart > 0 ? 0.85 + 0.15 * (1 - softStart / 10) : 1);
+
+      // batch3: red breathing vignette when the head is 1-2 cells from a wall
+      if (snake.length && state !== 'respawning') {
+        const h = snake[0].curr;
+        const d = Math.min(h.x, GRID_W - 1 - h.x, h.y, GRID_H - 1 - h.y);
+        const target = d <= 1 ? 1 : d === 2 ? 0.45 : 0;
+        dangerT += (target - dangerT) * Math.min(1, dt * 10);
+      } else {
+        dangerT += (0 - dangerT) * Math.min(1, dt * 10);
+      }
       let guard = 8; // hard cap per frame
       while ((state === 'playing' || state === 'boss') && stepTimer >= stepInterval && guard-- > 0) {
         stepTimer -= stepInterval;
@@ -1802,6 +1830,7 @@
       drawSnake();
     }
     drawDarkMask(); // feature T20: the 'dark' vignette over the scene
+    drawDanger(g); // batch3: wall-danger breathing
     CS.FX.draw(g);
     drawDmgPops();
   }
@@ -1828,6 +1857,38 @@
     g.save();
     g.fillStyle = grad;
     g.fillRect(0, 0, GRID_W * CELL, GRID_H * CELL);
+    g.restore();
+  }
+
+  function drawDanger(g) {
+    if (dangerT < 0.03) return;
+    const W = GRID_W * CELL;
+    const H = GRID_H * CELL;
+    const sig = W + 'x' + H;
+    if (dangerSig !== sig || !dangerCache) {
+      dangerSig = sig;
+      const c = document.createElement('canvas');
+      c.width = W;
+      c.height = H;
+      const g2 = c.getContext('2d');
+      const edge = Math.max(40, CELL * 2);
+      const grads = [
+        g2.createLinearGradient(0, 0, edge, 0),
+        g2.createLinearGradient(W, 0, W - edge, 0),
+        g2.createLinearGradient(0, 0, 0, edge),
+        g2.createLinearGradient(0, H, 0, H - edge)
+      ];
+      for (let i = 0; i < grads.length; i++) {
+        grads[i].addColorStop(0, 'rgba(255,45,85,.6)');
+        grads[i].addColorStop(1, 'rgba(255,45,85,0)');
+        g2.fillStyle = grads[i];
+        g2.fillRect(0, 0, W, H);
+      }
+      dangerCache = c;
+    }
+    g.save();
+    g.globalAlpha = dangerT * (0.7 + 0.3 * Math.sin(animTime * 8));
+    g.drawImage(dangerCache, 0, 0, W, H);
     g.restore();
   }
 
