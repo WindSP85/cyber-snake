@@ -1974,3 +1974,185 @@ body.in-telegram .tg-only {
     align-items: center;
   }
 }
+
+/* ============================================================
+   Feature T25: local duel history (SPEC §22 sociology pack 2)
+   the lobby streak badge, the battles screen rows, the brag button
+   ============================================================ */
+
+/* the «МОИ БОИ» peek under the join-by-code block */
+.duel-battles-btn {
+  margin-bottom: 14px;
+}
+
+/* the «🔥 N ПОДРЯД» badge under the lobby role line */
+.duel-streak {
+  margin: 0 0 14px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--yellow);
+  background: rgba(255, 230, 0, .06);
+  border: 1px solid rgba(255, 230, 0, .7);
+  text-shadow: 0 0 10px rgba(255, 230, 0, .6);
+  box-shadow:
+    0 0 14px rgba(255, 230, 0, .25),
+    inset 0 0 10px rgba(255, 230, 0, .06);
+  animation: streak-glow 2.2s ease-in-out infinite;
+}
+
+@keyframes streak-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 10px rgba(255, 230, 0, .18),
+      inset 0 0 8px rgba(255, 230, 0, .05);
+  }
+  50% {
+    box-shadow:
+      0 0 22px rgba(255, 230, 0, .45),
+      inset 0 0 12px rgba(255, 230, 0, .1);
+  }
+}
+
+/* ---------- the battles screen ---------- */
+
+/* the «ПОБЕДЫ: n · ПОРАЖЕНИЯ: n · 🔥 СЕРИЯ: n» line */
+.battles-stats {
+  margin: 0 0 16px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(0, 240, 255, .4);
+}
+
+/* the history rows: one mono line per battle */
+.battles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(46vh, 430px);
+  margin: 0 auto 18px;
+  padding-right: 6px;
+  overflow-y: auto;
+  text-align: left;
+}
+
+.battle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  font-family: var(--font);
+  font-size: 13px;
+  background: rgba(4, 5, 12, .6);
+  border: 1px solid rgba(0, 240, 255, .2);
+}
+
+/* the colored W/L/D square */
+.battle-mark {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid currentColor;
+}
+
+.battle-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #eafcff;
+}
+
+/* the score sits to the right, the date after it, dimmer */
+.battle-score {
+  flex: none;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--yellow);
+  text-shadow: 0 0 8px rgba(255, 230, 0, .4);
+}
+
+.battle-date {
+  flex: none;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: rgba(215, 247, 255, .5);
+}
+
+/* W = green, L = red, D = gray */
+.battle-win .battle-mark {
+  color: var(--green);
+  background: rgba(0, 255, 157, .08);
+  text-shadow: 0 0 8px rgba(0, 255, 157, .5);
+}
+
+.battle-loss .battle-mark {
+  color: var(--danger);
+  background: rgba(255, 45, 85, .08);
+  text-shadow: 0 0 8px rgba(255, 45, 85, .5);
+}
+
+.battle-draw .battle-mark {
+  color: rgba(215, 247, 255, .6);
+  background: rgba(215, 247, 255, .05);
+}
+
+/* the whole row follows its marker mood */
+.battle-win {
+  border-color: rgba(0, 255, 157, .35);
+}
+
+.battle-loss {
+  border-color: rgba(255, 45, 85, .35);
+}
+
+/* an empty history */
+.battles-empty {
+  margin: 0;
+  padding: 18px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: rgba(215, 247, 255, .45);
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .battle-row {
+    gap: 8px;
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+
+  .battle-mark {
+    width: 20px;
+    height: 20px;
+    font-size: 11px;
+  }
+
+  .battle-date {
+    font-size: 10px;
+  }
+
+  .battles-list {
+    max-height: 42vh;
+    gap: 5px;
+  }
+
+  .battles-stats {
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+}

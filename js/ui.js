@@ -7,8 +7,9 @@
 
   const CS = window.CS = window.CS || {};
 
-  // feature T24: 'duel' (the lobby) + 'duelresult' (the match result)
-  const SCREENS = ['lang', 'menu', 'controls', 'board', 'ach', 'skins', 'upg', 'pause', 'gameover', 'duel', 'duelresult'];
+  // feature T24: 'duel' (the lobby) + 'duelresult' (the match result);
+  // feature T25: 'battles' (the local duel history)
+  const SCREENS = ['lang', 'menu', 'controls', 'board', 'ach', 'skins', 'upg', 'pause', 'gameover', 'duel', 'duelresult', 'battles'];
   const TOAST_MS = 1600;
   const CLEAR_CONFIRM_MS = 3000; // feature T10: "Sure?" arming window
   const HANDLER_KEYS = ['start', 'resume', 'restart', 'menu', 'mute', 'lang', 'save'];
@@ -49,6 +50,7 @@
     if (name === 'ach') renderAch(); // feature T16: fresh cards on every show
     if (name === 'skins') renderSkins(); // feature T17: fresh swatches on every show
     if (name === 'upg') renderUpg(); // feature T19: fresh cards on every show
+    if (name === 'battles') renderBattles(); // feature T25: fresh rows on every show
   }
 
   function fire(name) {
@@ -366,6 +368,58 @@
     }
   }
 
+  /* ---------- feature T25: my battles screen (the duel history) ---------- */
+
+  /* rebuild #battles-stats + #battles-list from CS.DuelUI: the stats
+     line «ПОБЕДЫ: n · ПОРАЖЕНИЯ: n · 🔥 СЕРИЯ: n», then one mono row
+     per battle — a colored W/L/D marker, the rival's name, the score
+     (my view) and the date; an empty history shows battlesEmpty */
+  function renderBattles() {
+    const list = byId('battles-list');
+    if (!list) return;
+    const duel = CS.DuelUI || {};
+    const stats = typeof duel.stats === 'function'
+      ? duel.stats()
+      : { w: 0, l: 0, streak: 0 };
+    const rows = typeof duel.history === 'function' ? duel.history() : [];
+    setText('battles-stats',
+      t('battlesWins', stats.w) + ' · ' + t('battlesLosses', stats.l) +
+      ' · 🔥 ' + t('battlesStreak', stats.streak));
+    list.innerHTML = '';
+    if (!rows.length) {
+      const empty = document.createElement('p');
+      empty.className = 'battles-empty';
+      empty.textContent = t('battlesEmpty');
+      list.appendChild(empty);
+      return;
+    }
+    for (let i = 0; i < rows.length; i++) {
+      const b = rows[i] || {};
+      const r = b.r === 'win' ? 'win' : b.r === 'loss' ? 'loss' : 'draw';
+      const row = document.createElement('div');
+      row.className = 'battle-row battle-' + r;
+      const mark = document.createElement('span');
+      mark.className = 'battle-mark';
+      mark.textContent = r === 'win' ? 'W' : r === 'loss' ? 'L' : 'D';
+      const key = r === 'win' ? 'battleW' : r === 'loss' ? 'battleL' : 'battleD';
+      mark.title = t(key); // the full word as the marker tooltip
+      const name = document.createElement('span');
+      name.className = 'battle-name';
+      name.textContent = b.foe;
+      const score = document.createElement('span');
+      score.className = 'battle-score';
+      score.textContent = b.sc;
+      const date = document.createElement('span');
+      date.className = 'battle-date';
+      date.textContent = b.d;
+      row.appendChild(mark);
+      row.appendChild(name);
+      row.appendChild(score);
+      row.appendChild(date);
+      list.appendChild(row);
+    }
+  }
+
   /* the gameover name-save block — game.js decides when it shows */
   function hideScoreSave() {
     const el = byId('score-save');
@@ -662,6 +716,11 @@
     /* feature T10: rebuild the leaderboard rows right now */
     renderBoard: function () {
       renderBoard();
+    },
+
+    /* feature T25: rebuild the battles rows right now */
+    renderBattles: function () {
+      renderBattles();
     },
 
     /* Subscribe to button events: {start, resume, restart, menu, mute, lang, save} */

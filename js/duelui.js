@@ -18,6 +18,14 @@
    'aborted' → «СОПЕРНИК ПОКИНУЛ»); after the match end it only
    locks the rematch button.
 
+   Feature T25 (the duel sociology): every finished match (win,
+   loss, draw — never an abort) is saved into the local 'cs_duels'
+   history (up to 20, newest first). The lobby wears the «🔥 N
+   ПОДРЯД» badge on a 3+ win streak, the battles screen (ui.js
+   renderBattles) shows the stats + the last rows, and a win with
+   a known rival name offers the t.me brag share. The history is
+   purely local — it is written from the PC browser too.
+
    Every user-visible string is an i18n key; offline / file:// the
    transport degrades silently and the lobby shows the inline
    'no network' error and nothing else.
@@ -34,6 +42,10 @@
   const CODE_RE = /^[A-HJ-NP-Z2-9]{4}$/;     // the net.js code alphabet (no 0/O/1/I)
   const DEEP_RE = /^room-([A-HJ-NP-Z2-9]{4})$/i;
   const COPIED_MS = 2000;                    // «СКОПИРОВАНО» flash length
+  const DUELS_KEY = 'cs_duels';              // feature T25: the local history
+  const DUELS_MAX = 20;                      // the newest 20 battles only
+  const STREAK_MIN = 3;                      // «🔥 N ПОДРЯД» badge threshold
+  const BRAG_URL = 'https://t.me/windspsnake_bot/snake'; // the brag target
 
   /* ---------- state ---------- */
 
@@ -51,6 +63,8 @@
   let busy = false;         // an async create/join is in flight
   let flow = 0;             // bump on reset: stale async callbacks die
   let copiedTimer = 0;
+  let lastR = 'aborted';    // feature T25: the latest finished match result
+  let lastScore = '0:0';    // feature T25: its score, my view («2:1»)
 
   /* ---------- dom / i18n helpers ---------- */
 
@@ -58,8 +72,8 @@
     return document.getElementById(id);
   }
 
-  function t(key) {
-    return CS.I18N && typeof CS.I18N.t === 'function' ? CS.I18N.t(key) : key;
+  function t(key, arg) {
+    return CS.I18N && typeof CS.I18N.t === 'function' ? CS.I18N.t(key, arg) : key;
   }
 
   function setText(id, value) {
@@ -102,6 +116,68 @@
     return started && !ended;
   }
 
+  /* ---------- feature T25: the local duel history ---------- */
+
+  /* 'cs_duels': [{foe, r: 'win'|'loss'|'draw', sc: '2:1', d: 'DD.MM.YYYY'}]
+     newest first, capped at DUELS_MAX; written from any browser (Telegram
+     or a desktop one) — the file:// and offline cases included */
+  function loadDuels() {
+    try {
+      const raw = window.localStorage.getItem(DUELS_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveDuels(arr) {
+    try {
+      window.localStorage.setItem(DUELS_KEY, JSON.stringify(arr));
+    } catch (e) {
+      /* storage unavailable: the history lives until the reload */
+    }
+  }
+
+  /* today as DD.MM.YYYY (local time) */
+  function todayStr() {
+    const d = new Date();
+    const pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear();
+  }
+
+  /* a finished match goes on top; an aborted duel is not a battle */
+  function recordDuel(r, score) {
+    if (r !== 'win' && r !== 'loss' && r !== 'draw') return;
+    const arr = loadDuels();
+    arr.unshift({
+      foe: String(foeName || 'RIVAL').slice(0, 20),
+      r: r,
+      sc: String(score),
+      d: todayStr()
+    });
+    saveDuels(arr.slice(0, DUELS_MAX));
+  }
+
+  /* {w, l, streak}: streak counts the leading wins (a draw or a loss
+     breaks it), w/l are the totals across the whole history */
+  function duelStats() {
+    const arr = loadDuels();
+    let w = 0;
+    let l = 0;
+    let streak = 0;
+    for (let i = 0; i < arr.length; i++) {
+      const r = arr[i] && arr[i].r;
+      if (r === 'win') w++;
+      else if (r === 'loss') l++;
+    }
+    for (let i = 0; i < arr.length; i++) {
+      if (!arr[i] || arr[i].r !== 'win') break;
+      streak++;
+    }
+    return { w: w, l: l, streak: streak };
+  }
+
   /* ---------- lobby ui ---------- */
 
   function setError(key) {
@@ -117,6 +193,16 @@
       setText('duel-role', mode === 'host' ? t('duelHost') : t('duelGuest'));
       show('duel-role', true);
     }
+  }
+
+  /* feature T25: the «🔥 N ПОДРЯД» badge under the role line —
+     alive from a 3-win streak, refreshed on every lobby open and
+     after every match */
+  function renderStreakBadge() {
+    const streak = duelStats().streak;
+    const on = streak >= STREAK_MIN;
+    show('duel-streak', on);
+    if (on) setText('duel-streak', t('duelStreakBadge', streak));
   }
 
   /* the room code as one HUGE letter per plate */
@@ -179,6 +265,8 @@
     show('duel-join-block', true);
     show('duel-link-copy', false);
     show('duel-copied', false);
+    show('duel-streak', false); // feature T25: openLobby re-renders it
+    show('btn-duel-brag', false); // feature T25: the old result must not leak
     const input = byId('duel-code-input');
     if (input) {
       input.value = '';
@@ -204,6 +292,18 @@
 
   function openLobby() {
     reset();
+    renderStreakBadge(); // feature T25: the streak badge is a fresh read
+    if (CS.UI && typeof CS.UI.show === 'function') CS.UI.show('duel');
+  }
+
+  /* feature T25: «МОИ БОИ» — the battles screen over the lobby */
+  function openBattles() {
+    if (CS.UI && typeof CS.UI.show === 'function') CS.UI.show('battles');
+  }
+
+  /* its «НАЗАД»: back into the lobby exactly as it was — no channel
+     reset, so a waiting room survives the history peek */
+  function backToLobby() {
     if (CS.UI && typeof CS.UI.show === 'function') CS.UI.show('duel');
   }
 
@@ -350,10 +450,17 @@
     }
     const sc = res && Array.isArray(res.score) ? res.score : [0, 0];
     const myIdx = mode === 'host' ? 0 : 1;
-    setText('duel-result-score',
-      ((sc[myIdx] | 0) + ':' + (sc[1 - myIdx] | 0)));
+    const mine = (sc[myIdx] | 0) + ':' + (sc[1 - myIdx] | 0);
+    lastR = r;
+    lastScore = mine;
+    setText('duel-result-score', mine);
+    /* feature T25: the brag share needs a won duel and a known rival
+       (outside Telegram the .tg-only css keeps the button hidden) */
+    show('btn-duel-brag', r === 'win' && !!foeName);
     resetRematchButton();
     if (CS.UI && typeof CS.UI.show === 'function') CS.UI.show('duelresult');
+    recordDuel(r, mine); // feature T25: the local history ('aborted' skipped)
+    renderStreakBadge(); // the lobby badge is ready for the next visit
     reportDuelResult(r, sc); // SPEC §22: match history in the cloud
   }
 
@@ -463,6 +570,21 @@
     }
   }
 
+  /* feature T25: «ХВАСТАТЬСЯ» on the result screen — share the app
+     link with the «Я разбил ИМЯ 2:1!» text; only a real won duel
+     against a known rival ever gets here (the button is hidden
+     otherwise, and .tg-only hides it outside Telegram) */
+  function onBrag() {
+    if (lastR !== 'win' || !foeName) return;
+    try {
+      if (CS.TG && typeof CS.TG.shareLink === 'function') {
+        CS.TG.shareLink(BRAG_URL, t('duelBrag', foeName + ' ' + lastScore));
+      }
+    } catch (e) {
+      /* sharing is optional: ignore any failure */
+    }
+  }
+
   function flashCopied() {
     show('duel-copied', true);
     if (copiedTimer) window.clearTimeout(copiedTimer);
@@ -552,6 +674,10 @@
   function onKeyDown(e) {
     const code = (e && (e.code || e.key)) || '';
     if (code !== 'Escape') return;
+    if (visible('screen-battles')) {
+      backToLobby(); // feature T25: back into the duel context
+      return;
+    }
     if (visible('screen-duel')) {
       toMenu();
       return;
@@ -578,6 +704,9 @@
     bind('btn-duel-back', toMenu);
     bind('btn-duel-rematch', onRematch);
     bind('btn-duel-exit', exitAfterMatch);
+    bind('btn-duel-brag', onBrag); // feature T25
+    bind('btn-battles', openBattles); // feature T25
+    bind('btn-battles-back', backToLobby); // feature T25
     const input = byId('duel-code-input');
     if (input && typeof input.addEventListener === 'function') {
       input.addEventListener('input', onCodeInput);
@@ -610,6 +739,10 @@
     bootDeepLink: bootDeepLink,
     /* game.js goMenu hook: drop the channel + reset the lobby */
     reset: reset,
+    /* feature T25: the local history — {w, l, streak} and the raw
+       rows for ui.js renderBattles (test.html + headless tests too) */
+    stats: duelStats,
+    history: loadDuels,
     /* live debug/QA view (test.html + headless tests) */
     state: function () {
       return {

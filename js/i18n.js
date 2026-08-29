@@ -223,7 +223,20 @@
       duelErrNoNet: 'НЕТ СЕТИ ИЛИ ОБЛАКО НЕДОСТУПНО',
       duelErrFull: 'КОМНАТА ЗАНЯТА',
       duelErrNone: 'КОМНАТА НЕ НАЙДЕНА — ПРОВЕРЬТЕ КОД',
-      duelErrTimeout: 'НЕ УДАЛОСЬ СОЕДИНИТЬСЯ'
+      duelErrTimeout: 'НЕ УДАЛОСЬ СОЕДИНИТЬСЯ',
+      /* feature T25: local duel history (battles screen, streak, brag) */
+      battles: 'МОИ БОИ',
+      battlesTitle: 'МОИ БОИ',
+      battlesWins: 'ПОБЕДЫ: {1}',
+      battlesLosses: 'ПОРАЖЕНИЯ: {1}',
+      battlesStreak: 'СЕРИЯ: {1}',
+      battlesEmpty: 'ПОКА ПУСТО',
+      battleW: 'ПОБЕДА',
+      battleL: 'ПОРАЖЕНИЕ',
+      battleD: 'НИЧЬЯ',
+      duelBrag: 'Я разбил {1} в NEON://SNAKE! Побьёшь?',
+      duelBragBtn: 'ХВАСТАТЬСЯ',
+      duelStreakBadge: '🔥 {1} ПОДРЯД'
     },
     en: {
       langTitle: 'SELECT LANGUAGE',
@@ -433,7 +446,20 @@
       duelErrNoNet: 'NO NETWORK OR THE CLOUD IS UNREACHABLE',
       duelErrFull: 'ROOM IS FULL',
       duelErrNone: 'ROOM NOT FOUND — CHECK THE CODE',
-      duelErrTimeout: 'COULD NOT CONNECT'
+      duelErrTimeout: 'COULD NOT CONNECT',
+      /* feature T25: local duel history (battles screen, streak, brag) */
+      battles: 'MY BATTLES',
+      battlesTitle: 'MY BATTLES',
+      battlesWins: 'WINS: {1}',
+      battlesLosses: 'LOSSES: {1}',
+      battlesStreak: 'STREAK: {1}',
+      battlesEmpty: 'EMPTY YET',
+      battleW: 'WIN',
+      battleL: 'LOSS',
+      battleD: 'DRAW',
+      duelBrag: 'I crushed {1} in NEON://SNAKE! Beat me!',
+      duelBragBtn: 'BRAG',
+      duelStreakBadge: '🔥 {1} IN A ROW'
     }
   };
 

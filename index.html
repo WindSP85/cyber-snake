@@ -271,12 +271,18 @@
           </div>
         </div>
 
+        <!-- feature T25: the local duel history peek -->
+        <button id="btn-battles" class="btn btn-small duel-battles-btn" type="button" data-i18n="battles">МОИ БОИ</button>
+
         <!-- waiting status: HOST/GUEST · ждём соперника… -->
         <p id="duel-wait" class="duel-wait hidden">
           <span id="duel-role" class="duel-role"></span>
           <span id="duel-wait-text"></span>
           <span class="duel-dots"><i>.</i><i>.</i><i>.</i></span>
         </p>
+
+        <!-- feature T25: the 🔥 N-in-a-row badge (a 3+ win streak) -->
+        <p id="duel-streak" class="duel-streak hidden"></p>
 
         <!-- inline network error (duelErr*) -->
         <p id="duel-error" class="duel-error hidden"></p>
@@ -293,8 +299,23 @@
         <p id="duel-result-score" class="duel-score"></p>
         <div class="menu-buttons">
           <button id="btn-duel-rematch" class="btn btn-primary" type="button" data-i18n="duelRematch">РЕВАНШ</button>
+          <!-- feature T25: brag about a win (a win + a known rival only;
+               outside Telegram the .tg-only class keeps it hidden) -->
+          <button id="btn-duel-brag" class="btn tg-only hidden" type="button" data-i18n="duelBragBtn">ХВАСТАТЬСЯ</button>
           <button id="btn-duel-exit" class="btn" type="button" data-i18n="duelExit">ВЫЙТИ</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Screen: my battles (feature T25) — the local duel history -->
+    <div id="screen-battles" class="screen hidden">
+      <div class="panel">
+        <h2 class="screen-title" data-i18n="battlesTitle">МОИ БОИ</h2>
+        <!-- the stats line + the rows are (re)built by ui.js renderBattles() -->
+        <p id="battles-stats" class="battles-stats"></p>
+        <div id="battles-list" class="battles-list"></div>
+        <!-- back to the duel lobby (the duel context), not to the menu -->
+        <button id="btn-battles-back" class="btn" type="button" data-i18n="back">Назад</button>
       </div>
     </div>
 
