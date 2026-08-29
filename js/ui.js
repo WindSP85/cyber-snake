@@ -564,11 +564,19 @@
     });
 
     // feature T12: portrait D-pad — replay tile taps as arrow keydowns;
-    // game.js already listens for document keydown by e.code
-    document.addEventListener('click', function (e) {
+    // game.js already listens for document keydown by e.code;
+    // pointerdown = the turn registers the moment the finger TOUCHES the
+    // tile (click would wait for the release — perceptible lag on phones)
+    document.addEventListener('pointerdown', function (e) {
       const b = e.target && e.target.closest ? e.target.closest('.dpad-btn') : null;
       if (!b) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      e.preventDefault();
       document.dispatchEvent(new KeyboardEvent('keydown', { code: b.dataset.dir, bubbles: true }));
+    });
+    document.addEventListener('click', function (e) {
+      // swallow the ghost click that follows our preventDefault'ed press
+      if (e.target && e.target.closest && e.target.closest('.dpad-btn')) e.preventDefault();
     });
   }
 

@@ -40,7 +40,7 @@
   const CHARGE_SCORE = 25;
   const BOSS_EVERY = 3;             // every 3rd level
   const BOSS_SCORE = 250;           // x bossIndex
-  const INPUT_BUFFER = 3;
+  const INPUT_BUFFER = 2;             // 2 + axis-replacement = spam-proof responsiveness
   const DIE_TIME = 1;               // death sequence length
   const BANNER_TIME = 2;            // boss warning banner on screen
   const DMG_POP_TIME = 0.9;         // "-1" hit marker over the boss, seconds
@@ -1559,6 +1559,14 @@
     // daily 'mirror' holds the same inversion for the whole run (both
     // at once simply cancel out)
     if (hasEffect('reverse') !== dailyOn('mirror')) d = { x: -d.x, y: -d.y };
+    // not-yet-applied turns on the same axis are stale: the fresh press
+    // replaces them (spamming the D-pad never queues up a delayed turn)
+    while (dirQueue.length) {
+      const q = dirQueue[dirQueue.length - 1];
+      const sameAxis = (d.y === 0) === (q.y === 0);
+      if (sameAxis) dirQueue.pop();
+      else break;
+    }
     const last = dirQueue.length ? dirQueue[dirQueue.length - 1] : dir;
     if (d.x === last.x && d.y === last.y) return;      // repeat
     if (d.x === -last.x && d.y === -last.y) return;    // 180-degree reversal
