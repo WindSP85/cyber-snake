@@ -1,0 +1,75 @@
+/* ============================================================
+   NEON://SNAKE — service worker (PWA офлайн-кэш)
+   Стратегия: cache-first для оболочки; версия кэша в CACHE —
+   при изменении файлов подними VERSION, старый кэш удаляется.
+   ============================================================ */
+'use strict';
+
+const VERSION = 'v1';
+const CACHE = 'neon-snake-' + VERSION;
+const SHELL = [
+  './',
+  './index.html',
+  './manifest.webmanifest',
+  './icon.svg',
+  './css/style.css',
+  './js/config.js',
+  './js/i18n.js',
+  './js/audio.js',
+  './js/bosses.js',
+  './js/fx.js',
+  './js/leaderboard.js',
+  './js/telegram.js',
+  './js/net.js',
+  './js/achievements.js',
+  './js/skins.js',
+  './js/upgrades.js',
+  './js/daily.js',
+  './js/duel.js',
+  './js/duelui.js',
+  './js/ui.js',
+  './js/game.js'
+];
+
+self.addEventListener('install', function (e) {
+  e.waitUntil(
+    caches.open(CACHE).then(function (c) {
+      return c.addAll(SHELL);
+    }).then(function () {
+      return self.skipWaiting();
+    })
+  );
+});
+
+self.addEventListener('activate', function (e) {
+  e.waitUntil(
+    caches.keys().then(function (keys) {
+      return Promise.all(keys.map(function (k) {
+        if (k !== CACHE) return caches.delete(k);
+      }));
+    }).then(function () {
+      return self.clients.claim();
+    })
+  );
+});
+
+self.addEventListener('fetch', function (e) {
+  const url = e.request.url;
+  // только свои ресурсы; облако (Supabase/Telegram CDN) — всегда мимо кэша
+  if (e.request.method !== 'GET' ||
+      url.indexOf(self.location.origin) !== 0) return;
+  e.respondWith(
+    caches.match(e.request, { ignoreSearch: true }).then(function (hit) {
+      if (hit) return hit;
+      return fetch(e.request).then(function (resp) {
+        const copy = resp.clone();
+        caches.open(CACHE).then(function (c) {
+          c.put(e.request, copy);
+        });
+        return resp;
+      }).catch(function () {
+        return caches.match('./index.html');
+      });
+    })
+  );
+});

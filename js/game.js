@@ -1849,10 +1849,63 @@
     }
   }
 
+  /* ---------- PERF: baked arena background ----------
+     The grid (50+ strokes) and the neon accent frame used to be
+     redrawn with shadowBlur every frame. The whole background is
+     now baked once into an offscreen canvas at device resolution
+     and blitted with a single drawImage. The cache is invalidated
+     by signature: any change of the grid, the devicePixelRatio or
+     the level accent (once per level) re-bakes it — cheap. */
+  let bgCache = null;               // offscreen grid + accent frame
+  let bgCacheKey = '';              // GRID_W|GRID_H|dpr|accent signature
+
   function drawGrid() {
     const W = GRID_W * CELL;
     const H = GRID_H * CELL;
-
+    // neon arena frame in the level accent color (palette cycle)
+    const accent = PALETTE[(level - 1) % PALETTE.length];
+    const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const sig = GRID_W + '|' + GRID_H + '|' + dpr + '|' + accent;
+    if (sig !== bgCacheKey) {
+      bgCache = null;
+      bgCacheKey = '';
+      if (typeof document !== 'undefined' && document.createElement) {
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(W * dpr);
+        cv.height = Math.round(H * dpr);
+        const c = cv.getContext('2d');
+        if (c) {
+          c.setTransform(dpr, 0, 0, dpr, 0, 0);
+          c.strokeStyle = GRID_LINE;
+          c.lineWidth = 1;
+          c.beginPath();
+          for (let x = 1; x < GRID_W; x++) {
+            c.moveTo(x * CELL + 0.5, 0);
+            c.lineTo(x * CELL + 0.5, H);
+          }
+          for (let y = 1; y < GRID_H; y++) {
+            c.moveTo(0, y * CELL + 0.5);
+            c.lineTo(W, y * CELL + 0.5);
+          }
+          c.stroke();
+          c.save();
+          c.strokeStyle = accent;
+          c.lineWidth = 2;
+          c.shadowColor = accent;
+          c.shadowBlur = 14;
+          c.strokeRect(1, 1, W - 2, H - 2);
+          c.restore();
+          bgCache = cv;
+          bgCacheKey = sig;
+        }
+      }
+    }
+    if (bgCache) {
+      // full-source blit into W x H logical px == 1:1 device pixels
+      g.drawImage(bgCache, 0, 0, W, H);
+      return;
+    }
+    // canvasless fallback: the original direct strokes
     g.strokeStyle = GRID_LINE;
     g.lineWidth = 1;
     g.beginPath();
@@ -1865,9 +1918,6 @@
       g.lineTo(W, y * CELL + 0.5);
     }
     g.stroke();
-
-    // neon arena frame in the level accent color (palette cycle)
-    const accent = PALETTE[(level - 1) % PALETTE.length];
     g.save();
     g.strokeStyle = accent;
     g.lineWidth = 2;
@@ -1883,15 +1933,17 @@
     const cx = food.x * CELL + CELL / 2;
     const cy = food.y * CELL + CELL / 2;
     const s = CELL * (0.5 + 0.1 * pulse);
+    // PERF: the pulsing glow is a baked sprite stretched over the
+    // old 8+10*pulse blur envelope (no shadowBlur in this frame)
+    const b = 8 + 10 * pulse;
+    const gw = 2 * (s / 2 + 1.6 * b);
+    CS.FX.drawGlow(g, cx, cy, gw, gw, '#ff2bd6', 13);
     g.save();
     g.translate(cx, cy);
     g.rotate(Math.PI / 4);
-    g.shadowColor = '#ff2bd6';
-    g.shadowBlur = 8 + 10 * pulse;
     g.fillStyle = '#ff2bd6';
     roundRect(g, -s / 2, -s / 2, s, s, 3);
     g.fill();
-    g.shadowBlur = 0;
     g.fillStyle = '#ffffff';
     g.fillRect(-s * 0.12, -s * 0.12, s * 0.24, s * 0.24);
     g.restore();
@@ -1903,11 +1955,11 @@
     const cx = bonus.x * CELL + CELL / 2;
     const cy = bonus.y * CELL + CELL / 2;
     const bob = Math.sin(animTime * 3) * 2;
+    // PERF: baked glow sprite instead of a per-frame shadowBlur
+    CS.FX.drawGlow(g, cx + bob, cy, 2 * (10 + 1.6 * 10), 2 * (7 + 1.6 * 10), '#ffe600', 10);
     g.save();
     g.translate(cx + bob, cy);
     g.strokeStyle = '#ffe600';
-    g.shadowColor = '#ffe600';
-    g.shadowBlur = 10;
     g.lineWidth = 3;
     g.lineCap = 'round';
     g.beginPath();
@@ -2035,18 +2087,22 @@
       const cy = p.y * CELL + CELL / 2;
       const pulse = 0.5 + 0.5 * Math.sin(animTime * 5 + i * 1.7);
       const s = CELL * 0.7 * (0.92 + 0.08 * pulse); // light pulsation
+      /* PERF: the mystery color keeps flowing cyan <-> magenta, but
+         quantized to 1/8 steps so the glow sprite cache stays small */
       const color = p.type === 'life' ? '#ff2d55'
         : p.type === 'surge' ? '#ffe600'
         : p.type === 'magnet' ? '#00f0ff'
         : p.type === 'slow' ? '#7de3ff'
         : p.type === 'virus' ? '#ff7a00'
         : p.type === 'mystery' ? mixRgb([0, 240, 255], [255, 43, 214], // feature T11
-            0.5 + 0.5 * Math.sin(animTime * 4 + i * 1.7))
+            Math.round((0.5 + 0.5 * Math.sin(animTime * 4 + i * 1.7)) * 8) / 8)
         : '#ffe600';
+      // PERF: glow like the food, but baked + stretched, no shadowBlur
+      const b = 8 + 10 * pulse;
+      const gw = 2 * (s / 2 + 1.6 * b);
+      CS.FX.drawGlow(g, cx, cy, gw, gw, color, 13);
       g.save();
       g.translate(cx, cy);
-      g.shadowColor = color;
-      g.shadowBlur = 8 + 10 * pulse; // glow like the food
       g.fillStyle = color;
       if (p.type === 'life') drawHeartShape(s);
       else if (p.type === 'surge') drawBoltShape(s);
@@ -2069,12 +2125,13 @@
       const x = d.x * CELL;
       const y = d.y * CELL;
       g.save();
-      g.shadowColor = '#00f0ff';
-      g.shadowBlur = 6 + 10 * pulse;
+      // PERF: baked glow sprite replaces the per-frame shadowBlur
+      const b = 6 + 10 * pulse;
+      const gw = 2 * ((CELL - 8) / 2 + 1.6 * b);
+      CS.FX.drawGlow(g, x + CELL / 2, y + CELL / 2, gw, gw, '#00f0ff', 11);
       g.fillStyle = 'rgba(0,240,255,' + (0.3 + 0.4 * pulse).toFixed(3) + ')';
       roundRect(g, x + 4, y + 4, CELL - 8, CELL - 8, 4);
       g.fill();
-      g.shadowBlur = 0;
       g.strokeStyle = '#bffcff';
       g.lineWidth = 1.5;
       g.strokeRect(x + 7.5, y + 7.5, CELL - 15, CELL - 15);
@@ -2091,15 +2148,19 @@
       const jx = (Math.random() - 0.5) * 5; // panic jitter
       const jy = (Math.random() - 0.5) * 5;
       const pulse = 0.5 + 0.5 * Math.sin(animTime * 10 + i * 2.3);
+      const px = c.x * CELL + CELL / 2 + jx;
+      const py = c.y * CELL + CELL / 2 + jy;
+      const r = CELL * 0.26 + pulse * 2.5;
       g.save();
-      g.translate(c.x * CELL + CELL / 2 + jx, c.y * CELL + CELL / 2 + jy);
-      g.shadowColor = '#ff2bd6';
-      g.shadowBlur = 8 + 12 * pulse;
+      g.translate(px, py);
+      // PERF: baked glow sprite replaces the per-frame shadowBlur
+      const b = 8 + 12 * pulse;
+      const gw = 2 * (r + 1.6 * b);
+      CS.FX.drawGlow(g, 0, 0, gw, gw, '#ff2bd6', 14);
       g.fillStyle = 'rgba(255,43,214,' + (0.55 + 0.4 * pulse).toFixed(3) + ')';
       g.beginPath();
-      g.arc(0, 0, CELL * 0.26 + pulse * 2.5, 0, Math.PI * 2);
+      g.arc(0, 0, r, 0, Math.PI * 2);
       g.fill();
-      g.shadowBlur = 0;
       g.fillStyle = '#ffd7f6'; // inner glint
       g.beginPath();
       g.arc(-CELL * 0.07, -CELL * 0.07, CELL * 0.07, 0, Math.PI * 2);
@@ -2129,13 +2190,16 @@
     if (bank.t <= BANK_BLINK && Math.floor(animTime * 8) % 2 === 0) return;
     const cx = bank.x * CELL + CELL / 2;
     const cy = bank.y * CELL + CELL / 2;
-    const k = 0.5 + 0.5 * Math.sin(animTime * 2.6);    // green <-> cyan
+    /* green <-> cyan, quantized to 1/8 steps so the glow sprite cache
+       stays small (PERF: the glow itself is a baked sprite) */
+    const k = Math.round((0.5 + 0.5 * Math.sin(animTime * 2.6)) * 8) / 8;
     const pulse = 0.5 + 0.5 * Math.sin(animTime * 5);  // frame pulsation
     const color = mixRgb([0, 255, 157], [0, 240, 255], k);
     g.save();
     g.translate(cx, cy);
-    g.shadowColor = color;
-    g.shadowBlur = 8 + 10 * pulse;
+    const b = 8 + 10 * pulse;
+    const gw = 2 * (CELL * 0.46 + 1.6 * b);
+    CS.FX.drawGlow(g, 0, 0, gw, gw, color, 13);
     g.strokeStyle = color;
     g.lineWidth = 2.5;
     hexPath(CELL * 0.46);
@@ -2143,7 +2207,6 @@
     g.lineWidth = 1.5;
     hexPath(CELL * (0.3 + 0.05 * pulse)); // the inner ring breathes
     g.stroke();
-    g.shadowBlur = 0;
     g.fillStyle = color;
     g.beginPath(); // the deposit diamond token
     g.moveTo(0, -CELL * 0.16);
@@ -2445,7 +2508,15 @@
     updateMuteButton(CS.Audio.getMuted());
     updateDailyLine(); // feature T20: the day challenge line
     CS.UI.hud({ score: 0, best: best, level: 1 });
-    CS.UI.show('lang'); // language selection on every entry (feature T7)
+    // feature T7 v2: the picker only shows on the very first visit; repeat
+    // players go straight to the menu (the 🌐 button re-opens the picker)
+    let savedLang = false;
+    try {
+      savedLang = !!window.localStorage.getItem('cs_lang');
+    } catch (e) {
+      /* storage unavailable — show the picker */
+    }
+    CS.UI.show(savedLang ? 'menu' : 'lang');
     state = 'menu';
     // feature T24 (SPEC §22): a room-XXXX Telegram deep link opens the
     // duel lobby (the code pre-filled + an auto-join) instead of the
@@ -2486,6 +2557,11 @@
           boss: fight && fight.active ? fight.name + ' hp' + fight.hp : null,
           escaped: escaped.length
         };
+      },
+      /* PERF QA: the baked arena background signature — changes when
+         the grid / dpr / level accent re-bakes the cache */
+      bgInfo: function () {
+        return bgCacheKey;
       },
       feed: function () { const c = cellAhead(2); if (c) food = { x: c.x, y: c.y }; },
       grow: function (n) { growth += n || 5; },

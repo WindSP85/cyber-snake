@@ -45,6 +45,94 @@
   const FLASH_DEFAULT = 0.2;        // fallback flash duration, s
   const FLASH_CAP = 2;              // max flash duration, s
 
+  /* ---------- PERF: baked glow sprites ----------
+     shadowBlur in a per-particle loop is the single most expensive
+     thing on weak phones. Every glow is therefore baked ONCE into a
+     tiny offscreen canvas and blitted with drawImage:
+     - particle sprites ('p|color|r'): the exact dot the inline
+       arc+shadowBlur used to draw, core radius quantized to 1 px;
+     - glow sprites ('g|color|blur'): a soft halo blob for anything
+       pulsing behind a shape (food, pickups, boss shots) — the pulse
+     is done by stretching the blit, never by re-blurring.
+     One LRU map, capped at 64 entries. */
+
+  const SPRITE_MAX = 64;            // LRU cap on baked sprites
+  const P_GLOW = 6;                 // particle halo strength (the old inline blur)
+  const P_PAD = 9;                  // particle halo reach beyond the core, px
+  const G_CORE = 0.4;               // glow blob core disk : blur ratio
+  const G_REACH = 2.0;              // glow blob radius : blur ratio
+
+  const spriteCache = new Map();    // key -> canvas (insertion order = LRU)
+
+  function cacheGet(key) {
+    const cv = spriteCache.get(key);
+    if (cv !== undefined) {         // refresh the LRU recency
+      spriteCache.delete(key);
+      spriteCache.set(key, cv);
+    }
+    return cv;
+  }
+
+  function cachePut(key, cv) {
+    if (spriteCache.has(key)) spriteCache.delete(key);
+    spriteCache.set(key, cv);
+    if (spriteCache.size > SPRITE_MAX) {
+      spriteCache.delete(spriteCache.keys().next().value);
+    }
+    return cv;
+  }
+
+  function mkCanvas(w, h) {
+    if (typeof document === 'undefined' || !document.createElement) return null;
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    return cv;
+  }
+
+  /* one baked glowing dot: a core of radius r (quantized to 1 px)
+     plus the same 6 px halo the inline shadowBlur used to draw */
+  function particleSprite(color, r) {
+    const rq = Math.max(1, Math.round(r));
+    const key = 'p|' + color + '|' + rq;
+    let cv = cacheGet(key);
+    if (cv !== undefined) return cv;
+    const R = rq + P_PAD;
+    cv = mkCanvas(R * 2, R * 2);
+    if (!cv) return null;
+    const c = cv.getContext('2d');
+    if (!c) return null;
+    c.shadowColor = color;
+    c.shadowBlur = P_GLOW;
+    c.fillStyle = color;
+    c.beginPath();
+    c.arc(R, R, rq, 0, Math.PI * 2);
+    c.fill();
+    return cachePut(key, cv);
+  }
+
+  /* one baked halo blob: what shadowBlur casts around a compact
+     shape. The caller draws its crisp vector shape on top and pulls
+     the glow wider/narrower via the blit size — no per-frame blur. */
+  function glowSprite(color, blur) {
+    const b = Math.max(2, Math.round(blur));
+    const key = 'g|' + color + '|' + b;
+    let cv = cacheGet(key);
+    if (cv !== undefined) return cv;
+    const R = Math.ceil(b * G_REACH);
+    cv = mkCanvas(R * 2, R * 2);
+    if (!cv) return null;
+    const c = cv.getContext('2d');
+    if (!c) return null;
+    c.shadowColor = color;
+    c.shadowBlur = b;
+    c.fillStyle = color;
+    c.beginPath();
+    c.arc(R, R, Math.max(1, b * G_CORE), 0, Math.PI * 2);
+    c.fill();
+    return cachePut(key, cv);
+  }
+
   /* ---------- state ---------- */
 
   let particles = [];               // {x,y,vx,vy,life,maxLife,size,color,streak}
@@ -96,6 +184,7 @@
       g.globalAlpha = k;
       if (p.streak) {
         // moving spark: a short dash along its own velocity
+        // (streaks are cheap — no glow on purpose)
         g.shadowBlur = 0;
         g.strokeStyle = p.color;
         g.lineWidth = p.size * 0.8;
@@ -104,13 +193,20 @@
         g.lineTo(p.x - p.vx * 0.05, p.y - p.vy * 0.05);
         g.stroke();
       } else {
-        // glowing dot, shrinking as it dies
-        g.shadowColor = p.color;
-        g.shadowBlur = 6;
-        g.fillStyle = p.color;
-        g.beginPath();
-        g.arc(p.x, p.y, p.size * (0.4 + 0.6 * k), 0, Math.PI * 2);
-        g.fill();
+        // glowing dot, shrinking as it dies — PERF: the dot+halo is
+        // baked once per color+size and blitted (no shadowBlur here)
+        const spr = particleSprite(p.color, p.size * (0.4 + 0.6 * k));
+        if (spr) {
+          g.drawImage(spr, p.x - spr.width / 2, p.y - spr.height / 2);
+        } else {
+          // no offscreen canvases (canvasless env): the original glow
+          g.shadowColor = p.color;
+          g.shadowBlur = 6;
+          g.fillStyle = p.color;
+          g.beginPath();
+          g.arc(p.x, p.y, p.size * (0.4 + 0.6 * k), 0, Math.PI * 2);
+          g.fill();
+        }
       }
     }
     g.restore();
@@ -204,6 +300,22 @@
       drawFlash(g);
       drawParticles(g);
       drawGlitch(g);
+    },
+
+    /* PERF: soft halo behind a shape, baked once per color+blur and
+       stretched over w x h centered at (cx, cy). Pulsing = passing a
+       wider/narrower rect — the shadowBlur stays out of the hot path
+       (game.js food/pickups, bosses.js shots, duel.js packets). */
+    drawGlow: function (g, cx, cy, w, h, color, blur) {
+      if (!g) return;
+      const spr = glowSprite(color, blur);
+      if (!spr) return;
+      g.drawImage(spr, cx - w / 2, cy - h / 2, w, h);
+    },
+
+    /* QA: how many baked sprites are alive right now (LRU <= 64) */
+    spriteCacheSize: function () {
+      return spriteCache.size;
     },
 
     /* Particle burst at pixel coordinates; n defaults to 10.

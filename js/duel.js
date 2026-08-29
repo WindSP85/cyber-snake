@@ -864,9 +864,67 @@
 
   /* ---------- drawing ---------- */
 
+  /* PERF: the arena background (grid + the two-color frame) is baked
+     once per grid/dpr into an offscreen canvas and blitted with a
+     single drawImage — no per-frame strokes, no shadowBlur */
+  let arenaCache = null;            // offscreen grid + frame
+  let arenaCacheKey = '';           // GW|GH|dpr signature
+
   function drawArena(g) {
     const W = GW * CELL;
     const H = GH * CELL;
+    const dpr = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+    const sig = GW + '|' + GH + '|' + dpr;
+    if (sig !== arenaCacheKey) {
+      arenaCache = null;
+      arenaCacheKey = '';
+      if (typeof document !== 'undefined' && document.createElement) {
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(W * dpr);
+        cv.height = Math.round(H * dpr);
+        const c = cv.getContext('2d');
+        if (c) {
+          c.setTransform(dpr, 0, 0, dpr, 0, 0);
+          c.strokeStyle = GRID_LINE;
+          c.lineWidth = 1;
+          c.beginPath();
+          for (let x = 1; x < GW; x++) {
+            c.moveTo(x * CELL + 0.5, 0);
+            c.lineTo(x * CELL + 0.5, H);
+          }
+          for (let y = 1; y < GH; y++) {
+            c.moveTo(0, y * CELL + 0.5);
+            c.lineTo(W, y * CELL + 0.5);
+          }
+          c.stroke();
+          /* the arena frame: my color vs the rival's orange */
+          c.save();
+          c.lineWidth = 2;
+          c.shadowBlur = 14;
+          c.strokeStyle = MY_GLOW;
+          c.shadowColor = MY_GLOW;
+          c.beginPath();
+          c.moveTo(1, 1);
+          c.lineTo(W - 1, 1);
+          c.stroke();
+          c.strokeStyle = RIVAL_GLOW;
+          c.shadowColor = RIVAL_GLOW;
+          c.beginPath();
+          c.moveTo(W - 1, 1);
+          c.lineTo(W - 1, H - 1);
+          c.lineTo(1, H - 1);
+          c.stroke();
+          c.restore();
+          arenaCache = cv;
+          arenaCacheKey = sig;
+        }
+      }
+    }
+    if (arenaCache) {
+      g.drawImage(arenaCache, 0, 0, W, H); // 1:1 into logical px
+      return;
+    }
+    /* canvasless fallback: the original direct strokes */
     g.strokeStyle = GRID_LINE;
     g.lineWidth = 1;
     g.beginPath();
@@ -879,7 +937,6 @@
       g.lineTo(W, y * CELL + 0.5);
     }
     g.stroke();
-    /* the arena frame: my color vs the rival's orange */
     g.save();
     g.lineWidth = 2;
     g.shadowBlur = 14;
@@ -899,21 +956,25 @@
     g.restore();
   }
 
+  /* PERF: food glow = baked sprite stretched over the old blur
+     envelope (the solo field does the same in game.js) */
   function drawFoodCells(g) {
     for (let i = 0; i < food.length; i++) {
       const pulse = 0.5 + 0.5 * Math.sin(animTime * 6 + i * 1.9);
       const cx = food[i].x * CELL + CELL / 2;
       const cy = food[i].y * CELL + CELL / 2;
       const s = CELL * (0.5 + 0.1 * pulse);
+      const b = 8 + 10 * pulse;
+      const gw = 2 * (s / 2 + 1.6 * b);
+      if (CS.FX && typeof CS.FX.drawGlow === 'function') {
+        CS.FX.drawGlow(g, cx, cy, gw, gw, '#ff2bd6', 13);
+      }
       g.save();
       g.translate(cx, cy);
       g.rotate(Math.PI / 4);
-      g.shadowColor = '#ff2bd6';
-      g.shadowBlur = 8 + 10 * pulse;
       g.fillStyle = '#ff2bd6';
       roundRect(g, -s / 2, -s / 2, s, s, 3);
       g.fill();
-      g.shadowBlur = 0;
       g.fillStyle = '#ffffff';
       g.fillRect(-s * 0.12, -s * 0.12, s * 0.24, s * 0.24);
       g.restore();

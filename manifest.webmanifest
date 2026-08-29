@@ -1,0 +1,20 @@
+{
+  "name": "NEON://SNAKE",
+  "short_name": "NEON",
+  "description": "Киберпанк-змейка с боссами и онлайн-дуэлями · Cyberpunk snake with bosses and online duels",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#04050c",
+  "theme_color": "#00f0ff",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

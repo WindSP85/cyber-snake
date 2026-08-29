@@ -114,6 +114,15 @@
     g.restore();
   }
 
+  /* PERF: baked glow sprites live in CS.FX (fx.js loads after this
+     file, but long before any draw call). Without it the halo is
+     simply skipped — the shapes above stay exactly the same. */
+  function drawGlow(g, x, y, w, h, color, blur) {
+    if (CS.FX && typeof CS.FX.drawGlow === 'function') {
+      CS.FX.drawGlow(g, x, y, w, h, color, blur);
+    }
+  }
+
   /* ---------- BossFight ---------- */
   class BossFight {
     constructor(bossIndex, gridW, gridH, events) {
@@ -1542,25 +1551,31 @@
       g.restore();
     }
 
-    /* feature T9: long narrow bolts flying along their velocity */
+    /* feature T9: long narrow bolts flying along their velocity.
+       PERF: the glow is a baked stretched sprite — no shadowBlur in
+       this loop */
     drawProjectiles(g, cell) {
       for (let i = 0; i < this.projectiles.length; i++) {
         const p = this.projectiles[i];
+        const px = p.x * cell;
+        const py = p.y * cell;
+        drawGlow(g, px, py,
+          2 * (cell * 0.45 + 1.6 * 10), 2 * (cell * 0.11 + 1.6 * 10),
+          '#ffe600', 10);
         g.save();
-        g.translate(p.x * cell, p.y * cell);
+        g.translate(px, py);
         g.rotate(Math.atan2(p.vy, p.vx));
-        g.shadowColor = '#ffe600';
-        g.shadowBlur = 10;
         g.fillStyle = '#ffe600';
         g.fillRect(-cell * 0.45, -cell * 0.11, cell * 0.9, cell * 0.22);
-        g.shadowBlur = 0;
         g.fillStyle = '#ffffff';
         g.fillRect(-cell * 0.08, -cell * 0.05, cell * 0.45, cell * 0.1);
         g.restore();
       }
     }
 
-    /* feature T9: mines — dashed blink while arming, spikes once live */
+    /* feature T9: mines — dashed blink while arming, spikes once live.
+       PERF: the armed glow is a baked pulsing sprite (no shadowBlur
+       in this loop) */
     drawMines(g, cell) {
       for (let i = 0; i < this.mines.length; i++) {
         const m = this.mines[i];
@@ -1581,8 +1596,9 @@
           }
         } else {
           const pulse = 0.5 + 0.5 * Math.sin(this.time * 10);
-          g.shadowColor = '#ff2d55';
-          g.shadowBlur = 8 + pulse * 8;
+          const b = 8 + pulse * 8;
+          const gw = 2 * (cell * 0.3 + 1.6 * b);
+          drawGlow(g, cx, cy, gw, gw, '#ff2d55', 12);
           g.strokeStyle = '#ff2d55';
           g.lineWidth = 2;
           g.beginPath();
@@ -1604,16 +1620,27 @@
       }
     }
 
-    /* feature T9: small triangle drones with a cyan exhaust flame */
+    /* feature T9: small triangle drones with a cyan exhaust flame.
+       PERF: both glows are baked sprites (body + exhaust), no
+       shadowBlur in this loop */
     drawDrones(g, cell) {
       for (let i = 0; i < this.drones.length; i++) {
         const d = this.drones[i];
         const pulse = 0.5 + 0.5 * Math.sin(this.time * 30 + i * 2);
+        const ang = Math.atan2(d.vy || 0, d.vx || 1);
+        const dx = d.x * cell + cell / 2;
+        const dy = d.y * cell + cell / 2;
+        const b = 10 + pulse * 6;
+        drawGlow(g, dx, dy,
+          2 * (cell * 0.32 + 1.6 * b), 2 * (cell * 0.2 + 1.6 * b),
+          '#8a5cff', 13);
+        // exhaust glow sits behind the tail flame
+        drawGlow(g, dx - Math.cos(ang) * cell * 0.32, dy - Math.sin(ang) * cell * 0.32,
+          2 * (cell * 0.16 + 1.6 * 8), 2 * (cell * 0.1 + 1.6 * 8),
+          '#00f0ff', 8);
         g.save();
-        g.translate(d.x * cell + cell / 2, d.y * cell + cell / 2);
-        g.rotate(Math.atan2(d.vy || 0, d.vx || 1));
-        g.shadowColor = '#8a5cff';
-        g.shadowBlur = 10 + pulse * 6;
+        g.translate(dx, dy);
+        g.rotate(ang);
         g.fillStyle = '#8a5cff';
         g.beginPath();
         g.moveTo(cell * 0.32, 0);
@@ -1621,8 +1648,6 @@
         g.lineTo(-cell * 0.22, -cell * 0.2);
         g.closePath();
         g.fill();
-        g.shadowColor = '#00f0ff';
-        g.shadowBlur = 8;
         g.fillStyle = 'rgba(0,240,255,' + (0.5 + 0.5 * pulse).toFixed(3) + ')';
         g.beginPath();
         g.moveTo(-cell * 0.22, -cell * 0.08);
@@ -1743,6 +1768,8 @@
       g.restore();
     }
 
+    /* PERF: firewalls draw their per-cell flare as a baked sprite —
+       up to 18 cells never touch shadowBlur */
     drawFirewalls(g, cell) {
       const flare = this.phase === 'attack' && this.attackKind === 'firewall';
       for (let i = 0; i < this.firewalls.length; i++) {
@@ -1759,11 +1786,10 @@
           g.setLineDash([]);
         } else {
           const flash = flare ? 0.5 + 0.5 * Math.sin(this.time * 30) : 0;
-          g.shadowColor = '#ff7a00';
-          g.shadowBlur = 8 + flash * 10;
+          const gw = 2 * (cell / 2 + 1.6 * (8 + flash * 10));
+          drawGlow(g, x + cell / 2, y + cell / 2, gw, gw, '#ff7a00', 13);
           g.fillStyle = 'rgba(255,122,0,' + (0.22 + flash * 0.25).toFixed(3) + ')';
           g.fillRect(x + 1.5, y + 1.5, cell - 3, cell - 3);
-          g.shadowBlur = 0;
           g.strokeStyle = '#ff7a00';
           g.lineWidth = 2;
           g.strokeRect(x + 1.5, y + 1.5, cell - 3, cell - 3);
