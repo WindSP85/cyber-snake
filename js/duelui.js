@@ -47,6 +47,7 @@
   let rematchFoe = false;   // the rival pressed it
   let foeGone = false;      // the rival left after the match end
   let myNetId = '';         // my presence key (learned from list[].self)
+  let foeName = '';         // the rival's display name (from presence)
   let busy = false;         // an async create/join is in flight
   let flow = 0;             // bump on reset: stale async callbacks die
   let copiedTimer = 0;
@@ -353,6 +354,38 @@
       ((sc[myIdx] | 0) + ':' + (sc[1 - myIdx] | 0)));
     resetRematchButton();
     if (CS.UI && typeof CS.UI.show === 'function') CS.UI.show('duelresult');
+    reportDuelResult(r, sc); // SPEC §22: match history in the cloud
+  }
+
+  /* fire-and-forget duel_results insert (only real win/loss matches) */
+  function reportDuelResult(r, sc) {
+    try {
+      if (r !== 'win' && r !== 'loss') return;
+      const cfg = window.CS && CS.Config;
+      if (!cfg || !cfg.supabaseUrl || !cfg.supabaseKey) return;
+      const mine = (CS.Net && typeof CS.Net.myName === 'function' ? CS.Net.myName() : '') || 'PLAYER';
+      const foe = foeName || 'RIVAL';
+      const body = {
+        winner: r === 'win' ? mine : foe,
+        loser: r === 'win' ? foe : mine,
+        rounds: (sc[0] | 0) + ':' + (sc[1] | 0)
+      };
+      const ctl = new AbortController();
+      const kill = setTimeout(function () { ctl.abort(); }, 5000);
+      fetch(cfg.supabaseUrl.replace(/\/$/, '') + '/rest/v1/duel_results', {
+        method: 'POST',
+        headers: {
+          'apikey': cfg.supabaseKey,
+          'Authorization': 'Bearer ' + cfg.supabaseKey,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify(body),
+        signal: ctl.signal
+      }).catch(function () {}).then(function () { clearTimeout(kill); });
+    } catch (e) {
+      /* the duel result screen must never depend on the network */
+    }
   }
 
   /* ---------- rematch ---------- */
@@ -374,7 +407,11 @@
       for (let i = 0; i < list.length; i++) {
         const e = list[i] || {};
         if (e.self) myNetId = String(e.id || '');
-        else others++;
+        else {
+          others++;
+          const nm = String(e.name || '').trim();
+          if (nm) foeName = nm.slice(0, 20);
+        }
       }
     }
     const left = diff && Array.isArray(diff.left) ? diff.left : [];

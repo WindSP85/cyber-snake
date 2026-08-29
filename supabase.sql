@@ -37,3 +37,16 @@ create policy "public insert" on scores for insert with check (true);
 
 -- Индекс топа: выборка топ-10 по убыванию счёта
 create index if not exists scores_score_desc on scores (score desc);
+
+-- Дуэли (SPEC §22): результаты матчей 1x1
+create table if not exists duel_results (
+  id bigint generated always as identity primary key,
+  created_at timestamptz default now() not null,
+  winner text not null,
+  loser text not null,
+  rounds text not null,
+  season text not null default to_char(now(), 'YYYY-MM')
+);
+alter table duel_results enable row level security;
+create policy "public read" on duel_results for select using (true);
+create policy "public insert" on duel_results for insert with check (true);

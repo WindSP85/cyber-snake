@@ -504,6 +504,7 @@
     onPresence: onPresence,
     heartbeat: heartbeat,
     leave: leave,
-    state: state
+    state: state,
+    myName: function () { return myName; }
   };
 })();
