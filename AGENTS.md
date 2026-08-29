@@ -23,7 +23,7 @@ node check-i18n.js
 
 ## Технические правила
 
-- Vanilla JS: IIFE, `'use strict'`, 2 пробела, единый неймспейс `window.CS`; никаких модулей, сборки, CDN. **Исключение:** официальный `https://telegram.org/js/telegram-web-app.js` — подключён в index.html; вне Telegram/офлайн он не загружается, а весь код проверяет `window.Telegram` перед использованием.
+- Vanilla JS: IIFE, `'use strict'`, 2 пробела, единый неймспейс `window.CS`; никаких модулей, сборки, CDN. **Исключение 1:** официальный `https://telegram.org/js/telegram-web-app.js` — подключён в index.html; вне Telegram/офлайн он не загружается, а весь код проверяет `window.Telegram` перед использованием. **Исключение 2:** `https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js` (SPEC §22) — грузится ДИНАМИЧЕСКИ (`CS.Net.ensureClient` в `js/net.js`) только при входе в режим дуэли; офлайн/обычная игра и file:// без дуэли сеть не трогают вовсе.
 - Без `console.log` в проде.
 - Игра обязана работать с `file://`: сетевые вызовы — только через `js/config.js` при заполненном облаке, всё в try/catch.
 - Порядок скриптов в index.html: `config → i18n → audio → bosses → fx → leaderboard → ui → game`.
