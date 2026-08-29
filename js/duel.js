@@ -59,7 +59,7 @@
   const TRAP_MARGIN = 5;          // reachable < len + 5 -> trapped
   const TRAP_SLOWMO = 1;          // slow-mo length, s
   const TRAP_SLOW_FACTOR = 0.2;   // simulation speed while trapped
-  const STATE_INTERVAL = 0.1;     // host snapshot broadcast, s
+  const STATE_INTERVAL = 0.0625;  // host snapshot broadcast, s (T27: 16/s)
   const STATE_TIMEOUT = 3;        // guest rival-drop threshold, s
   const SNAP_LERP = 0.12;         // guest head lerp window, s
   const TICK_GUARD = 6;           // max ticks per update frame
@@ -112,6 +112,10 @@
   let stateTimer = 0;          // host: broadcast throttle
   let netStateAge = 0;         // guest: seconds since last state
   let snapAge = 0;             // guest: seconds since snapshot
+  let pred = null;             // T27 guest prediction of MY snake
+  let predTimer = 0;           // guest: local tick accumulator
+  let predPrevHead = null;     // T27 reconciliation: my head one tick ago
+  let predTrail = [];          // T27: my last few head cells ("x,y")
   let guestLastCount = -1;     // guest countdown beeps
   let events = { bite: 0, trap: 0, eat: 0, round: 0 }; // host counters
   let guestEvents = { bite: 0, trap: 0, eat: 0, round: 0 };
@@ -692,6 +696,54 @@
     return { segs: segs, dir: DIR.right, queue: [], growth: 0, pass: 0 };
   }
 
+  /* T27: advance the predicted own snake by one local tick — pure
+     movement, no authority: collisions/food/rounds stay with the host */
+  function predTick() {
+    if (!pred || !pred.segs.length) return;
+    const h = pred.segs[0];
+    predPrevHead = { x: h.curr.x, y: h.curr.y };
+    takeTurn(pred);
+    moveSnake(pred, { x: h.curr.x + pred.dir.x, y: h.curr.y + pred.dir.y });
+    predTrail.push(pred.segs[0].curr.x + ',' + pred.segs[0].curr.y);
+    if (predTrail.length > 4) predTrail.shift();
+  }
+
+  /* T27: keep the prediction when the host merely lags my in-flight
+     input (head adjacent / exactly one tick behind); adopt the host
+     truth on real divergence or a length change (food, bites) */
+  function cloneSnake(s) {
+    const segs = [];
+    for (let i = 0; i < s.segs.length; i++) {
+      segs.push({
+        prev: { x: s.segs[i].prev.x, y: s.segs[i].prev.y },
+        curr: { x: s.segs[i].curr.x, y: s.segs[i].curr.y }
+      });
+    }
+    return { segs: segs, dir: s.dir, queue: [], growth: 0, pass: s.pass };
+  }
+
+  function reconcilePred(snap) {
+    if (!pred || phase !== 'fight') {
+      pred = cloneSnake(snap);
+      predTimer = 0;
+      return;
+    }
+    const ph = pred.segs[0].curr;
+    const sh = snap.segs[0].curr;
+    const manh = Math.abs(ph.x - sh.x) + Math.abs(ph.y - sh.y);
+    // the host is 1-2 ticks behind my in-flight input: its head sits on
+    // MY recent path — that is consistency, not divergence
+    const onTrail = predTrail.indexOf(sh.x + ',' + sh.y) !== -1 ||
+      (predPrevHead && predPrevHead.x === sh.x && predPrevHead.y === sh.y);
+    if ((manh <= 1 || onTrail) && snap.segs.length === pred.segs.length) {
+      pred.pass = snap.pass; // mirror the pass-through shield timer
+      return;
+    }
+    pred = cloneSnake(snap);
+    predTimer = 0;
+    predTrail = [];
+  }
+
   function applySnapshot(d) {
     if (!d || typeof d !== 'object' || !Array.isArray(d.sn)) return;
     netStateAge = 0;
@@ -706,6 +758,7 @@
         s.dir = DIR_LIST[(d.d && Number.isFinite(d.d[i])) ? Math.max(0, Math.min(3, d.d[i])) : 0];
         s.pass = snakes[i] ? snakes[i].pass : 0;
         snakes[i] = s;
+        if (i === myIndex && !host) reconcilePred(s);
       }
     }
     food = [];
@@ -724,6 +777,11 @@
     roundWinner = Number.isFinite(d.w) ? d.w : null;
     phase = typeof d.ph === 'string' ? d.ph : phase;
     if (Number.isFinite(d.pt)) phaseTimer = d.pt;
+    if (phase === 'countdown' || phase === 'roundEnd') {
+      pred = null;      // T27: a fresh round rebuilds the prediction
+      predTimer = 0;
+      predTrail = [];
+    }
 
     /* local countdown beeps + the fight tone */
     if (phase === 'countdown') {
@@ -846,6 +904,16 @@
         while (tickTimer >= step && guard-- > 0 && phase === 'fight') {
           tickTimer -= step;
           tick();
+        }
+      } else if (pred) {
+        // T27: the guest simulates its OWN snake locally — the turn shows
+        // up on the very next local tick, no network round trip involved
+        predTimer += dt * slow;
+        const step = 1 / TICK_RATE;
+        let guard = TICK_GUARD;
+        while (predTimer >= step && guard-- > 0 && phase === 'fight') {
+          predTimer -= step;
+          predTick();
         }
       }
     } else if (phase === 'roundEnd') {
@@ -982,15 +1050,20 @@
   }
 
   function drawSnake(g, side) {
-    const s = snakes[side];
+    const mine = side === myIndex;
+    // T27: the guest renders its OWN snake from the local prediction —
+    // turns appear on the next local tick instead of a network hop
+    const usePred = mine && !host && pred && phase === 'fight';
+    const s = usePred ? pred : snakes[side];
     if (!s || !s.segs.length) return;
     const n = s.segs.length;
-    const mine = side === myIndex;
     let t;
     if (host) {
       t = Math.min(1, tickTimer * TICK_RATE);
+    } else if (usePred) {
+      t = Math.min(1, predTimer * TICK_RATE);
     } else if (phase === 'fight') {
-      t = Math.min(1, snapAge / SNAP_LERP); // guest: head lerp only
+      t = Math.min(1, snapAge / SNAP_LERP); // guest rival: head lerp
     } else {
       t = 1;
     }
@@ -1111,6 +1184,8 @@
     /* {host:bool, myIndex:0|1, onMatchEnd(result,score)} */
     begin: function (opts) {
       const o = opts || {};
+      pred = null;       // T27: fresh prediction per match
+      predTimer = 0;
       host = o.host !== false;
       myIndex = (o.myIndex === 0 || o.myIndex === 1) ? o.myIndex : (host ? 0 : 1);
       foeIndex = 1 - myIndex;
@@ -1175,6 +1250,7 @@
         if (snakes[myIndex]) queueTurn(snakes[myIndex], v);
       } else {
         netSend('turn', { dir: dirName(v) });
+        if (pred) queueTurn(pred, v); // T27: instant local response
       }
     },
 
@@ -1194,6 +1270,7 @@
         score: score,
         roundWinner: roundWinner,
         snakes: snakes,
+        pred: pred ? (pred.segs[0].curr.x + ',' + pred.segs[0].curr.y) : null, // T27 QA
         food: food,
         banner: banner,
         slowmo: slowmo,
