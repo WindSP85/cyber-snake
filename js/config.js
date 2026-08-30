@@ -16,7 +16,7 @@
   const CS = window.CS = window.CS || {};
 
   CS.Config = {
-    apiBase: '',
-    wsUrl: ''
+    apiBase: 'https://144-31-61-4.sslip.io',
+    wsUrl: 'wss://144-31-61-4.sslip.io/ws'
   };
 })();
