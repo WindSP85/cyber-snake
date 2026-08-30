@@ -44,5 +44,5 @@ node check-secrets.js
 - `server/` — игровой сервер VPS: `server.js` (API + WS-реле), `store.js` (json-хранилище), `bot.js` (Telegram long polling), `ws/` (вендорная библиотека ws, обновляется заменой каталога), `test/` — тесты (обязательны: `node server/test/run-tests.js` и `node server/test/run-game-transport.js`).
 - `Dockerfile`, `docker-compose.yml`, `server/Caddyfile`, `deploy/deploy.py` — разворачивание на VPS (SPEC §28).
 - `js/audio.js` — синтез музыки/SFX; `js/fx.js` — частицы/глитч; `js/ui.js` — экраны/HUD/D-pad.
-- Supabase удалён (история: таблицы рекордов/дуэлей). Всё облако — свой VPS-сервер из `server/`.
+- Вся серверная часть — собственный VPS-сервер из `server/` (сторонние облака не используются).
 - `SPEC.md` — источник правды по геймдизайну и контрактам; расширение v2 — разделы §11–§14.

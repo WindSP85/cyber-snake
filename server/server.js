@@ -1,5 +1,5 @@
 /* ============================================================
-   NEON://SNAKE — игровой сервер на VPS (замена Supabase)
+   NEON://SNAKE — игровой сервер на VPS
    Один процесс, ноль внешних зависимостей (кроме вендорной ws):
 
    HTTP API (Caddy терминирует HTTPS и проксирует сюда):
@@ -8,7 +8,7 @@
    - POST /api/score             — новый рекорд {name,score,level,season}
    - POST /api/duel              — итог матча {winner,loser,rounds}
 
-   WebSocket /ws — реле дуэлей 1×1 (замена Supabase Realtime):
+   WebSocket /ws — реле дуэлей 1×1:
    - клиент: {t:'join',room,id,name} → {t:'joined',ok}
    - клиент: {t:'msg',type,data}    → всем остальным {t:'msg',type,data,from}
    - клиент: {t:'ping'}             → {t:'pong'}
@@ -75,8 +75,7 @@ function readBody(req, cb) {
   req.on('error', function () { cb(new Error('read error')); });
 }
 
-/* валидация рекорда — те же правила, что были в CHECK-ограничениях
-   таблицы Supabase (имя 1-20, очки 0-999999, сезон YYYY-MM) */
+/* валидация рекорда: имя 1-20, очки 0-999999 int, сезон YYYY-MM */
 function validScoreEntry(b) {
   const name = String(b && b.name || '').trim();
   if (!name || name.length > 20) return { error: 'name' };

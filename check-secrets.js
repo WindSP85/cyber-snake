@@ -23,7 +23,7 @@ const RULES = [
   ['приватный ключ', /-----BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/],
   ['JWT-токен', /eyJ[A-Za-z0-9_-]{20,}\.eyJ[A-Za-z0-9_-]{20,}\./],
   ['строка подключения к БД', /\b(postgres|postgresql|mysql|redis|amqp):\/\/[^\s"']*:[^\s"'@]+@/],
-  ['service_role ключ Supabase', /\bservice_role[A-Za-z0-9_-]{20,}/i],
+  ['служебный ключ облачного провайдера', /\bservice_role[A-Za-z0-9_-]{20,}/i],
   ['явный пароль в коде', /(?:password|passwd|pwd)\s*[:=]\s*['"][^'"\s]{4,}['"]/i],
   ['явный секрет в коде', /(?:secret|api_secret|client_secret)\s*[:=]\s*['"][^'"\s]{8,}['"]/i]
 ];

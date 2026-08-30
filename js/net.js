@@ -1,6 +1,6 @@
 /* ============================================================
    NEON://SNAKE — realtime transport for online duels (T22,
-   SPEC §22; VPS-редакция: чистый WebSocket вместо Supabase)
+   SPEC §22; транспорт — чистый WebSocket к своему серверу)
    CS.Net: thin WebSocket wrapper for 1×1 rooms — join, message
    relay, presence. HOST/GUEST LOGIC LIVES ELSEWHERE (T23):
    this file is a pure transport, it knows nothing about the game.
