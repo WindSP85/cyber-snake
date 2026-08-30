@@ -89,6 +89,9 @@ for (const f of files) {
 for (const f of files) {
   if (f.indexOf('check-secrets.js') !== -1) continue; // сами правила
   if (!isTextFile(f)) continue;
+  /* тестовые фикстуры mock-*: одноразовые ключи для localhost-моков,
+     секретной ценности не имеют; остальные правила остаются в силе */
+  const isMockFixture = f.indexOf('/fixtures/mock-') !== -1;
   let text = '';
   try {
     text = fs.readFileSync(f, 'utf8');
@@ -102,6 +105,7 @@ for (const f of files) {
       const m = re.exec(line);
       if (!m) continue;
       if (ALLOW.some(a => line.indexOf(a) !== -1)) continue;
+      if (isMockFixture && name === 'приватный ключ') continue; // см. выше
       console.log('✗ ' + f + ':' + (i + 1) + ' — похоже на ' + name);
       console.log('    ' + line.trim().slice(0, 90).replace(m[0], m[0].slice(0, 6) + '…<<<СЕКРЕТ>>>'));
       bad++;

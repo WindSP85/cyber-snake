@@ -8,17 +8,40 @@
    - /top — топ-5 текущего сезона
    - любой другой текст — подсказка
 
-   Если api.telegram.org недоступен с VPS (бывает на хостинге
-   в РФ) — бот тихо ждёт и перепроверяет доступность раз в 5
-   минут; API игры и дуэли работают независимо.
+   Обход блокировки api.telegram.org на РФ-хостинге: Cloudflare
+   WARP на хосте работает SOCKS5-прокси (режим proxy не меняет
+   маршрутизацию сервера), бот ходит в Telegram через него.
+   Переменные: WARP_PROXY_HOST + WARP_PROXY_PORT (пустые = напрямую).
+
+   Если Telegram всё же недоступен — бот тихо ждёт и перепроверяет;
+   API игры и дуэли работают независимо.
    ============================================================ */
 'use strict';
 
 const https = require('https');
+const net = require('net');
+
+const API_HOST = process.env.TG_API_HOST || 'api.telegram.org';
+const API_PORT = Number(process.env.TG_API_PORT) || 443;
+const API_IP = process.env.TG_API_IP || '';   // обход блокировки части
+                                              // диапазона Telegram у провайдера
+const PROXY_HOST = process.env.WARP_PROXY_HOST || '';
+const PROXY_PORT = Number(process.env.WARP_PROXY_PORT) || 0;
+const USE_PROXY = !!PROXY_HOST && !!PROXY_PORT;
+
+/* DNS-подмена для исходящего соединения: hostname/SNI/сертификат
+   остаются api.telegram.org, а TCP идёт на закреплённый IP */
+function pinnedLookup(host, opts, cb) {
+  if (API_IP && host === API_HOST) {
+    cb(null, [{ address: API_IP, family: 4 }]);
+    return;
+  }
+  const dns = require('dns');
+  dns.lookup(host, opts, cb);
+}
 
 const RETRY_MIN = 3000;     // пауза между попытками при сетевой ошибке
 const RETRY_MAX = 60000;    // потолок экспоненциальной паузы
-const IDLE_RECHECK = 300000; // повторная проверка доступности, мс (5 мин)
 
 const WELCOME =
   '⚡ NEON://SNAKE — киберпанк-змейка с боссами и онлайн-дуэлями!\n\n' +
@@ -29,36 +52,123 @@ const WELCOME =
 const HELP =
   'Я живой 🙂 Команды: /top — топ сезона. Игра — кнопка внизу.';
 
+/* ---------- SOCKS5 без зависимостей (рукопожатие + CONNECT) ----------
+   Возвращает ГОЛЫЙ сокет до API_HOST:443; TLS поверх него делает
+   сам https.request через createConnection — сертификат
+   api.telegram.org проверяется как обычно. */
+
+function socks5Connect(cb) {
+  let stage = 0;
+  const sock = net.connect(PROXY_PORT, PROXY_HOST);
+  const fail = function (err) {
+    cleanup();
+    cb(err);
+  };
+  const cleanup = function () {
+    sock.removeAllListeners('data');
+    sock.removeAllListeners('error');
+    try { sock.destroy(); } catch (e) { /* уже мёртв */ }
+  };
+  sock.once('error', function (err) { fail(err); });
+  sock.once('connect', function () {
+    // приветствие: версия 5, один метод — без аутентификации
+    sock.write(Buffer.from([0x05, 0x01, 0x00]));
+  });
+  sock.on('data', function onData(chunk) {
+    if (stage === 0) {
+      if (chunk.length < 2 || chunk[0] !== 0x05) {
+        fail(new Error('socks: плохое приветствие'));
+        return;
+      }
+      if (chunk[1] !== 0x00) {
+        fail(new Error('socks: прокси требует аутентификацию'));
+        return;
+      }
+      // запрос CONNECT к домену (тип адреса 3)
+      const host = Buffer.from(API_HOST, 'utf8');
+      const req = Buffer.alloc(7 + host.length);
+      req[0] = 0x05; req[1] = 0x01; req[2] = 0x00; req[3] = 0x03;
+      req[4] = host.length;
+      host.copy(req, 5);
+      req.writeUInt16BE(API_PORT, 5 + host.length);
+      sock.write(req);
+      stage = 1;
+      return;
+    }
+    // ответ CONNECT: VER REP RSV ATYP ...
+    if (chunk.length < 4 || chunk[1] !== 0x00) {
+      fail(new Error('socks: connect отклонён (' + (chunk[1] | 0) + ')'));
+      return;
+    }
+    sock.removeAllListeners('data');
+    sock.removeAllListeners('error');
+    cb(null, sock);
+  });
+}
+
+/* TLS-сокет через прокси: https.request с createConnection НЕ делает
+   TLS сам — эта опция заменяет транспорт целиком, поэтому обертываем
+   туннель сами; сертификат api.telegram.org проверяется как обычно */
+function proxySocket() {
+  return new Promise(function (resolve, reject) {
+    socks5Connect(function (err, sock) {
+      if (err) {
+        reject(err);
+        return;
+      }
+      const tls = require('tls');
+      const tlsSock = tls.connect({ socket: sock, servername: API_HOST }, function () {
+        resolve(tlsSock);
+      });
+      tlsSock.once('error', function (e) {
+        try { sock.destroy(); } catch (e2) { /* уже мёртв */ }
+        reject(e);
+      });
+    });
+  });
+}
+
 /* ---------- HTTP в одну строку без зависимостей ---------- */
 
 function post(token, method, body, timeoutMs) {
   return new Promise(function (resolve, reject) {
     const payload = JSON.stringify(body || {});
-    const req = https.request({
-      hostname: 'api.telegram.org',
-      path: '/bot' + token + '/' + method,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload)
-      },
-      timeout: timeoutMs
-    }, function (res) {
-      let raw = '';
-      res.on('data', function (chunk) { raw += chunk; });
-      res.on('end', function () {
-        try {
-          resolve({ status: res.statusCode, json: JSON.parse(raw) });
-        } catch (e) {
-          resolve({ status: res.statusCode, json: null });
-        }
+    const go = function (extra) {
+      const req = https.request(Object.assign({
+        hostname: API_HOST,
+        port: API_PORT,
+        path: '/bot' + token + '/' + method,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload)
+        },
+        lookup: API_IP ? pinnedLookup : undefined,
+        timeout: timeoutMs
+      }, extra || {}), function (res) {
+        let raw = '';
+        res.on('data', function (chunk) { raw += chunk; });
+        res.on('end', function () {
+          try {
+            resolve({ status: res.statusCode, json: JSON.parse(raw) });
+          } catch (e) {
+            resolve({ status: res.statusCode, json: null });
+          }
+        });
       });
-    });
-    req.on('timeout', function () {
-      req.destroy(new Error('timeout'));
-    });
-    req.on('error', reject);
-    req.end(payload);
+      req.on('timeout', function () {
+        req.destroy(new Error('timeout'));
+      });
+      req.on('error', reject);
+      req.end(payload);
+    };
+    if (USE_PROXY) {
+      proxySocket().then(function (sock) {
+        go({ createConnection: function () { return sock; } });
+      }, reject);
+    } else {
+      go();
+    }
   });
 }
 
@@ -124,7 +234,7 @@ async function runBot(opts) {
     const wh = await post(token, 'deleteWebhook', { drop_pending_updates: false }, 10000);
     log('bot: deleteWebhook → ' + wh.status);
   } catch (e) {
-    log('bot: api.telegram.org недоступен, повторю позже');
+    log('bot: api.telegram.org недоступен, повторю позже (' + e.message + ')');
   }
 
   while (running) {

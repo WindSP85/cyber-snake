@@ -20,6 +20,10 @@ services:
       - DATA_DIR=/app/data
     ports:
       - "127.0.0.1:${GAME_PORT:-8090}:8080"
+    # бот внутри контейнера ходит к WARP-прокси на хосте (обход
+    # блокировки api.telegram.org; см. deploy/deploy-warp.py)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - game-data:/app/data
     dns:
