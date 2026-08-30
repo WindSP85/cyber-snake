@@ -43,3 +43,30 @@ python deploy/deploy.py --host <IP> --user root --password '<пароль>' \
 никаких панелей. Если api.telegram.org недоступен с VPS — бот сам
 повторяет попытки, игра работает независимо. Логи:
 `docker compose logs game | grep bot`.
+
+## Вариант для VPS с уже занятыми портами 80/443 (наш боевой)
+
+На продакшн-VPS nginx уже обслуживает другие сайты — тогда Caddy не
+нужен, TLS терминирует существующий nginx отдельным vhost'ом:
+
+```bash
+python deploy/deploy-nginx.py --host <IP> --port 2222 --user root   --password '<пароль>' --bot-token '<токен>' --game-port 8177
+```
+
+Скрипт НИЧЕГО чужого не трогает: контейнер слушает только
+127.0.0.1:8177, добавляется один файл `sites-available/neon-snake`,
+сертификат — certbot --webroot (не правит конфиги), перед reload
+обязателен `nginx -t`. Боевой адрес: https://144-31-61-4.sslip.io
+
+Известная особенность хостинга в РФ: api.telegram.org с такого VPS
+недоступен (TCP режется провайдером) — бот в контейнере тихо ждёт и
+переподключается, игра и дуэли работают независимо (см. docker logs).
+
+## Боевые E2E-тесты
+
+```bash
+node server/test/run-e2e-prod.js
+```
+
+Прогоняет настоящие js/net.js + js/leaderboard.js против живого
+сервера: HTTPS, рекорды, wss-комнаты, реле, обрыв соперника.
