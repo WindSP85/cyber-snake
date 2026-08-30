@@ -23,17 +23,38 @@ const net = require('net');
 
 const API_HOST = process.env.TG_API_HOST || 'api.telegram.org';
 const API_PORT = Number(process.env.TG_API_PORT) || 443;
-const API_IP = process.env.TG_API_IP || '';   // обход блокировки части
-                                              // диапазона Telegram у провайдера
+/* TG_API_IP — обход блокировки части диапазона Telegram у провайдера.
+   Список через запятую; при сбое соединения бот сам переходит к
+   следующему адресу, а за последним — обычный DNS (вдруг рассвет и
+   блокировку сняли). Пустое значение = всегда обычный DNS. */
+const API_IPS = (process.env.TG_API_IP || '')
+  .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+const ROUTE_COUNT = API_IPS.length + 1;      // закреплённые + DNS-резерв
+let routeIdx = 0;                            // активный маршрут
+
 const PROXY_HOST = process.env.WARP_PROXY_HOST || '';
 const PROXY_PORT = Number(process.env.WARP_PROXY_PORT) || 0;
 const USE_PROXY = !!PROXY_HOST && !!PROXY_PORT;
 
+/* адрес активного маршрута; '' = обычный DNS */
+function currentRouteIp() {
+  if (ROUTE_COUNT <= 1) return '';
+  const i = routeIdx % ROUTE_COUNT;
+  return i < API_IPS.length ? API_IPS[i] : '';
+}
+
+/* сбой соединения → следующий маршрут (следующая попытка retries
+   в главном цикле пойдёт уже по нему) */
+function rotateRoute() {
+  if (ROUTE_COUNT > 1) routeIdx++;
+}
+
 /* DNS-подмена для исходящего соединения: hostname/SNI/сертификат
    остаются api.telegram.org, а TCP идёт на закреплённый IP */
 function pinnedLookup(host, opts, cb) {
-  if (API_IP && host === API_HOST) {
-    cb(null, [{ address: API_IP, family: 4 }]);
+  const ip = currentRouteIp();
+  if (host === API_HOST && ip) {
+    cb(null, [{ address: ip, family: 4 }]);
     return;
   }
   const dns = require('dns');
@@ -143,7 +164,7 @@ function post(token, method, body, timeoutMs) {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(payload)
         },
-        lookup: API_IP ? pinnedLookup : undefined,
+        lookup: ROUTE_COUNT > 1 ? pinnedLookup : undefined,
         timeout: timeoutMs
       }, extra || {}), function (res) {
         let raw = '';
@@ -159,7 +180,10 @@ function post(token, method, body, timeoutMs) {
       req.on('timeout', function () {
         req.destroy(new Error('timeout'));
       });
-      req.on('error', reject);
+      req.on('error', function (err) {
+        rotateRoute(); // сеть подвела → следующий маршрут
+        reject(err);
+      });
       req.end(payload);
     };
     if (USE_PROXY) {
