@@ -2156,3 +2156,14 @@ body.in-telegram .tg-only {
     letter-spacing: 1px;
   }
 }
+
+/* T27b: identity line in the duel lobby */
+.duel-youare {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  color: #7de3ff;
+  letter-spacing: 1px;
+  font-size: 11px;
+  text-shadow: 0 0 8px rgba(0, 240, 255, .4);
+}

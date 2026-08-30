@@ -192,6 +192,9 @@
       setText('duel-wait-text', t('duelWait'));
       setText('duel-role', mode === 'host' ? t('duelHost') : t('duelGuest'));
       show('duel-role', true);
+      // T27b: whose snake is whose — right in the lobby, before the fight
+      setText('duel-youare', t(mode === 'host' ? 'duelYouAreHost' : 'duelYouAre'));
+      show('duel-youare', true);
     }
   }
 
@@ -423,7 +426,11 @@
     setError(null);
     setWait(false);
     show('duel-room', false);
+    show('duel-youare', false);
     if (CS.UI && typeof CS.UI.show === 'function') CS.UI.show('game');
+    if (CS.Duel && typeof CS.Duel.setRivalName === 'function') {
+      CS.Duel.setRivalName(foeName); // T27b: the label above the rival
+    }
     const ok = CS.Game && typeof CS.Game.startDuel === 'function'
       ? CS.Game.startDuel({
           host: mode === 'host',

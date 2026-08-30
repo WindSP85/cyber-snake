@@ -116,6 +116,8 @@
   let predTimer = 0;           // guest: local tick accumulator
   let predPrevHead = null;     // T27 reconciliation: my head one tick ago
   let predTrail = [];          // T27: my last few head cells ("x,y")
+  let rivalName = '';          // T27b: shown above the rival's head
+  let fightTime = 0;           // T27b: seconds since the fight began
   let guestLastCount = -1;     // guest countdown beeps
   let events = { bite: 0, trap: 0, eat: 0, round: 0 }; // host counters
   let guestEvents = { bite: 0, trap: 0, eat: 0, round: 0 };
@@ -703,7 +705,15 @@
     const h = pred.segs[0];
     predPrevHead = { x: h.curr.x, y: h.curr.y };
     takeTurn(pred);
-    moveSnake(pred, { x: h.curr.x + pred.dir.x, y: h.curr.y + pred.dir.y });
+    const nx = h.curr.x + pred.dir.x;
+    const ny = h.curr.y + pred.dir.y;
+    if (nx < 0 || nx >= GW || ny < 0 || ny >= GH) {
+      // T27fix: the wall is the host's verdict — the prediction freezes
+      // at the border instead of visually sliding through it
+      predTrail.length = 0;
+      return;
+    }
+    moveSnake(pred, { x: nx, y: ny });
     predTrail.push(pred.segs[0].curr.x + ',' + pred.segs[0].curr.y);
     if (predTrail.length > 4) predTrail.shift();
   }
@@ -782,6 +792,7 @@
       predTimer = 0;
       predTrail = [];
     }
+    if (phase === 'fight' && prevPhase !== 'fight') fightTime = 0; // T27b
 
     /* local countdown beeps + the fight tone */
     if (phase === 'countdown') {
@@ -893,10 +904,12 @@
         phase = 'fight';
         phaseTimer = 0;
         tickTimer = 0;
+        fightTime = 0;
         setBanner('dReady', 0.8, '#00ff9d');
         sfx('duelGo');
       }
     } else if (phase === 'fight') {
+      fightTime += dt; // T27b: identity label timings
       if (host) {
         tickTimer += dt * slow;
         const step = 1 / TICK_RATE;
@@ -1021,6 +1034,56 @@
     g.lineTo(W - 1, H - 1);
     g.lineTo(1, H - 1);
     g.stroke();
+    g.restore();
+  }
+
+  /* T27b: during the countdown and the first seconds the players see
+     a big «YOU» over their own head and the rival's name over theirs;
+     then a small chevron marker fades out by second ten */
+  function drawIdentity(g) {
+    if (phase !== 'countdown' && phase !== 'fight') return;
+    const intro = phase === 'countdown' || fightTime < 3;
+    if (!intro && fightTime >= 10) return;
+    g.save();
+    g.textAlign = 'center';
+    g.textBaseline = 'bottom';
+    for (let side = 0; side < 2; side++) {
+      const mine = side === myIndex;
+      const usePred = mine && !host && pred && phase === 'fight';
+      const sn = usePred ? pred : snakes[side];
+      if (!sn || !sn.segs.length) continue;
+      const h = sn.segs[0].curr;
+      const x = h.x * CELL + CELL / 2;
+      const y = h.y * CELL - 4;
+      if (mine) {
+        if (intro) {
+          g.globalAlpha = 0.75 + 0.25 * Math.sin(animTime * 7);
+          g.font = 'bold 15px "Cascadia Mono", Consolas, monospace';
+          g.fillStyle = '#ffffff';
+          g.shadowColor = MY_GLOW;
+          g.shadowBlur = 8;
+          g.fillText(tr('duelYou'), x, y);
+        } else {
+          // 3..10 s: a small chevron pointer
+          const a = Math.max(0, 1 - (fightTime - 3) / 7);
+          g.globalAlpha = 0.6 * a;
+          g.fillStyle = '#ffffff';
+          g.beginPath();
+          g.moveTo(x, y - 2);
+          g.lineTo(x - 5, y - 10);
+          g.lineTo(x + 5, y - 10);
+          g.closePath();
+          g.fill();
+        }
+      } else if (intro && rivalName) {
+        g.globalAlpha = 0.8;
+        g.font = '11px "Cascadia Mono", Consolas, monospace';
+        g.fillStyle = '#ff9d5c';
+        g.shadowColor = RIVAL_GLOW;
+        g.shadowBlur = 6;
+        g.fillText(rivalName, x, y);
+      }
+    }
     g.restore();
   }
 
@@ -1168,6 +1231,7 @@
     drawFoodCells(g);
     drawSnake(g, 0);
     drawSnake(g, 1);
+    drawIdentity(g); // T27b: «YOU» + names during the countdown start
     drawHud(g);
     drawBanner(g);
   }
@@ -1242,6 +1306,11 @@
     },
 
     /* steer MY snake: host queues directly, guest broadcasts */
+    /* T27b: whose snake is whose — set by duelui at the match start */
+    setRivalName: function (n) {
+      rivalName = String(n || '').slice(0, 20);
+    },
+
     input: function (d) {
       if (!live) return;
       const v = normDir(d);
