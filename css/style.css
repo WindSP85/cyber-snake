@@ -39,6 +39,8 @@ body {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  overscroll-behavior: none;   /* iOS: никакой «резинки» и перехвата свайпов */
+  touch-action: manipulation;  /* iOS: без двойного тапа-зума по интерфейсу */
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -79,6 +81,7 @@ body::before {
 
 #game-canvas {
   display: block;
+  touch-action: none;          /* iOS: свайпы по полю — только игре */
   width: 100%;
   height: 100%;
   background: var(--bg);
@@ -1129,7 +1132,11 @@ body::before {
   transition: background .18s, color .18s, box-shadow .18s, transform .06s;
   user-select: none;
   -webkit-user-select: none;
-  touch-action: manipulation;
+  /* без лупилки/меню длинного нажатия iOS на быстрых сериях тычков */
+  -webkit-touch-callout: none;
+  /* none, не manipulation: прокрутка запрещена, и iOS не может
+     отменить нажатие (pointercancel), сдвинув палец на 2-3px */
+  touch-action: none;
 }
 
 .dpad-btn:active {
@@ -1183,7 +1190,14 @@ body::before {
     width: min(440px, 94vw);
     margin: 0;
     margin-top: auto; /* прижат к низу экрана любого размера */
-    margin-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+    /* 12px + safe-area: кнопка «вниз» обязана быть ВЫШЕ зоны жеста
+       «домой» iPhone и нижней панели Telegram, иначе iOS съедает касания */
+    margin-bottom: max(12px, calc(env(safe-area-inset-bottom, 0px) + 6px));
+  }
+
+  /* внутри Telegram на iOS снизу висит панель приложения — ещё запас */
+  body.in-telegram .dpad {
+    margin-bottom: max(18px, calc(env(safe-area-inset-bottom, 0px) + 10px));
   }
 
   .dpad-btn {

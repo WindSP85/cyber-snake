@@ -26,7 +26,12 @@ class FakeWS {
     this.onopen = this.onmessage = this.onclose = this.onerror = null;
     const inner = new WsLib(url, { rejectUnauthorized: true });
     this._inner = inner;
+    inner.on('open', () => { this.readyState = 1; if (this.onopen) this.onopen(); });
+    inner.on('message', (raw) => { if (this.onmessage) this.onmessage({ data: String(raw) }); });
+    inner.on('close', () => { this.readyState = 3; if (this.onclose) this.onclose(); });
+    inner.on('error', (err) => { if (this.onerror) this.onerror(err); });
   }
+  send(s) { try { this._inner.send(s); } catch (e) { /* уже закрыт */ } }
   close() { this.readyState = 2; try { this._inner.close(); } catch (e) {} }
 }
 
