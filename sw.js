@@ -1,11 +1,14 @@
 /* ============================================================
    NEON://SNAKE — service worker (PWA офлайн-кэш)
-   Стратегия: cache-first для оболочки; версия кэша в CACHE —
-   при изменении файлов подними VERSION, старый кэш удаляется.
+   Стратегия: сеть-в-приоритете (network-first) для своей оболочки —
+   игроки всегда получают свежую версию при онлайне; кэш — фолбэк
+   на случай офлайна. Облако (Supabase/Telegram CDN) — всегда мимо.
+   Отдельная оболочка обновляется на второй перезагрузке после
+   деплоя (первая — скачивает новый sw.js, вторая — служит свежим).
    ============================================================ */
 'use strict';
 
-const VERSION = 'v1';
+const VERSION = 'v3';
 const CACHE = 'neon-snake-' + VERSION;
 const SHELL = [
   './',
@@ -55,20 +58,20 @@ self.addEventListener('activate', function (e) {
 
 self.addEventListener('fetch', function (e) {
   const url = e.request.url;
-  // только свои ресурсы; облако (Supabase/Telegram CDN) — всегда мимо кэша
   if (e.request.method !== 'GET' ||
       url.indexOf(self.location.origin) !== 0) return;
   e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then(function (hit) {
-      if (hit) return hit;
-      return fetch(e.request).then(function (resp) {
-        const copy = resp.clone();
-        caches.open(CACHE).then(function (c) {
-          c.put(e.request, copy);
-        });
-        return resp;
-      }).catch(function () {
-        return caches.match('./index.html');
+    fetch(e.request).then(function (resp) {
+      // свежий ответ — обновляем кэш в фоне
+      const copy = resp.clone();
+      caches.open(CACHE).then(function (c) {
+        c.put(e.request, copy);
+      });
+      return resp;
+    }).catch(function () {
+      // офлайн: отдаём последнее известное
+      return caches.match(e.request, { ignoreSearch: true }).then(function (hit) {
+        return hit || caches.match('./index.html');
       });
     })
   );

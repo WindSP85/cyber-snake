@@ -29,7 +29,7 @@ node check-i18n.js
 - Порядок скриптов в index.html: `config → i18n → audio → bosses → fx → leaderboard → ui → game`.
 - Стили: только добавления в конец соответствующих секций css/style.css; не ломать существующие media-запросы.
 - Тестирование фич: headless-тесты логики обязательны; в браузере — детерминированный стенд `test.html?debug=1` (панель кнопок QA + CS.Debug API; файл локальный, в git не попадает) и `?debug=1`-крюки в game.js. Слепой «рандом-прогон» — не проверка.
-- Публикация: `git push origin main` (GitHub Pages подхватывает за ~1 минуту). Репозиторий: WindSP85/cyber-snake, сайт https://windsp85.github.io/cyber-snake/.
+- Публикация: `git push origin main` (GitHub Pages подхватывает за ~1 минуту). **РЕЛИЗНЫЙ ЧЕК-ЛИСТ:** при каждом пуле с изменениями js/css/index — подними VERSION в sw.js (vN → vN+1), иначе у игроков с офлайн-кэшем останется старая версия (стратегия network-first теперь смягчает это, но версия всё равно страхует); (GitHub Pages подхватывает за ~1 минуту). Репозиторий: WindSP85/cyber-snake, сайт https://windsp85.github.io/cyber-snake/.
 - Безопасность: никаких секретов в коде (публичный ключ Supabase — исключение by design); имена/почты не светить; коммиты — от `WindSP85@users.noreply.github.com`.
 
 ## Карта проекта
