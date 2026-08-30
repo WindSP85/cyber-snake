@@ -20,7 +20,7 @@
 - ❓ **Контейнеры-тайны**: что внутри — неизвестно: джекпот +500, ×2 очки, турбо, жизнь, **реверс управления**, **распад змейки** (лови сбежавшие ядра!), или мгновенная смерть.
 - 🏦 **Хранилище хвоста**: периодический портал конвертирует отросший хвост в очки (+15 × уровень за сегмент) — вечный рост больше не приговор.
 - 👾 **8 боссов** каждые 3 уровня (далее — усиленные mk-версии): лазеры, файрволы, рывки, рассекающий луч с разрезанием змейки, снаряды и мины, босс-пожиратель хвоста, заморозка, дроны-антивирусы.
-- 🏆 **Таблица лидеров**: локальный топ-10 с именами и датами; при рекорде — предложение сохранить результат (интерфейс готов к глобальному серверу).
+- 🏆 **Таблица лидеров**: глобальный сезонный топ на собственном сервере (VPS, Docker) + локальный топ-10 офлайн.
 - 🎵 **Живой звук**: музыка и 20+ эффектов синтезируются в реальном времени (Web Audio API): меню 84 BPM, игра 100 BPM, боевой режим 128 BPM с дисторшн-басом.
 - ✨ **Эффекты**: частицы, тряска, глитчи, CRT-сканлайны, всплывающий «−1» урона над боссом.
 - 🏅 **Достижения** (13) и **скины змейки** (7: неон, лёд, токсин, магма, золото, радуга, призрак) — открываются за подвиги.
@@ -61,7 +61,7 @@ An arcade snake in cyberpunk aesthetics: neon grid, glitch effects, a fully synt
 - ❓ **Mystery containers**: jackpot +500, ×2 score, turbo, life, **reversed controls**, **snake split** (catch the escaped cores!), or instant death.
 - 🏦 **Tail bank**: a periodic portal converts your grown tail into points (+15 × level per segment).
 - 👾 **8 bosses** every 3rd level (then stronger mk-versions): lasers, firewalls, dashes, a cutting beam that slices the snake, projectiles and mines, a tail-devouring boss, freeze waves, antivirus drones.
-- 🏆 **Leaderboard**: local top-10 with names and dates; server-ready interface.
+- 🏆 **Leaderboard**: global seasonal board on a self-hosted server (VPS, Docker) + offline local top-10.
 - 🎵 **Live sound**: music and 20+ SFX synthesized in real time (Web Audio API).
 - ✨ **Juice**: particles, screen shake, glitches, CRT scanlines, floating «−1» damage markers.
 

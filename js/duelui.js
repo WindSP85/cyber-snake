@@ -471,12 +471,12 @@
     reportDuelResult(r, sc); // SPEC §22: match history in the cloud
   }
 
-  /* fire-and-forget duel_results insert (only real win/loss matches) */
+  /* fire-and-forget duel result POST (only real win/loss matches) */
   function reportDuelResult(r, sc) {
     try {
       if (r !== 'win' && r !== 'loss') return;
       const cfg = window.CS && CS.Config;
-      if (!cfg || !cfg.supabaseUrl || !cfg.supabaseKey) return;
+      if (!cfg || !cfg.apiBase) return;
       const mine = (CS.Net && typeof CS.Net.myName === 'function' ? CS.Net.myName() : '') || 'PLAYER';
       const foe = foeName || 'RIVAL';
       const body = {
@@ -486,14 +486,9 @@
       };
       const ctl = new AbortController();
       const kill = setTimeout(function () { ctl.abort(); }, 5000);
-      fetch(cfg.supabaseUrl.replace(/\/$/, '') + '/rest/v1/duel_results', {
+      fetch(cfg.apiBase.replace(/\/$/, '') + '/api/duel', {
         method: 'POST',
-        headers: {
-          'apikey': cfg.supabaseKey,
-          'Authorization': 'Bearer ' + cfg.supabaseKey,
-          'Content-Type': 'application/json',
-          'Prefer': 'return=minimal'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: ctl.signal
       }).catch(function () {}).then(function () { clearTimeout(kill); });

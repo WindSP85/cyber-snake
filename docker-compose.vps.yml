@@ -1,0 +1,30 @@
+# ============================================================
+#   NEON://SNAKE — вариант для VPS, где 80/443 уже заняты
+#   чужим nginx (порты не трогаем, TLS терминирует nginx
+#   отдельным vhost'ом; см. deploy/deploy-nginx.py)
+#
+#   Игра слушает ТОЛЬКО на localhost:8090 — наружу её отдаёт
+#   nginx через proxy_pass. Порт 8080 на хосте занят чужим
+#   конфигом, 8000 — чужим контейнером.
+# ============================================================
+
+services:
+  game:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - PORT=8080
+      - DATA_DIR=/app/data
+    ports:
+      - "127.0.0.1:${GAME_PORT:-8090}:8080"
+    volumes:
+      - game-data:/app/data
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+
+volumes:
+  game-data:

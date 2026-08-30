@@ -1,21 +1,20 @@
 /* ============================================================
    NEON://SNAKE — leaderboard (feature T10, SPEC §13; T14: global;
-   T20: seasonal global mode)
-   CS.Leaderboard: local top-10 high scores + optional Supabase.
+   T20: seasonal global mode; VPS-редакция: свой сервер вместо
+   свой VPS-сервер)
+   CS.Leaderboard: local top-10 high scores + optional global.
 
    ARCHITECTURE NOTE: the provider seam below (providerRead /
    providerWrite / providerClear) is the only place that touches
    localStorage. The local board (load / qualifies / submit / clear)
    stays synchronous and always works — the global mode
    (feature T14) only ADDS fetchRemote / submitRemote on top and
-   degrades gracefully: no CS.Config credentials → no network at
-   all (file://-safe), a failed request → null / false, never an
+   degrades gracefully: no CS.Config.apiBase → no network at all
+   (file://-safe), a failed request → null / false, never an
    exception.
 
    feature T20: every global read/write carries season = the local
-   'YYYY-MM' month. Reads filter season=eq.<month>; until the cloud
-   column exists an empty/failed filtered answer triggers ONE retry
-   without the filter (legacy rows) — never an exception.
+   'YYYY-MM' month; GET /api/top filters by it server-side.
    ============================================================ */
 (function () {
   'use strict';
@@ -99,35 +98,22 @@
     return Number.isFinite(score) && score > 0;
   }
 
-  /* ---------- feature T14: global mode (Supabase REST) ---------- */
+  /* ---------- feature T14: global mode (свой VPS-сервер) ---------- */
 
   function trimmed(value) {
     return String(value || '').trim();
   }
 
-  /* both credentials filled (without spaces) → the cloud is wired up */
+  /* apiBase filled (without spaces) → the server is wired up */
   function isGlobal() {
     const cfg = CS.Config;
     if (!cfg) return false;
-    return !!trimmed(cfg.supabaseUrl) && !!trimmed(cfg.supabaseKey);
+    return !!trimmed(cfg.apiBase);
   }
 
-  /* {url}/rest/v1/... — tolerant of a trailing slash in the config */
+  /* {apiBase}/api/... — tolerant of a trailing slash in the config */
   function endpoint(path) {
-    return trimmed(CS.Config.supabaseUrl).replace(/\/+$/, '') + path;
-  }
-
-  function netHeaders(extra) {
-    const key = trimmed(CS.Config.supabaseKey);
-    const headers = {
-      apikey: key,
-      Authorization: 'Bearer ' + key
-    };
-    if (extra) {
-      const keys = Object.keys(extra);
-      for (let i = 0; i < keys.length; i++) headers[keys[i]] = extra[keys[i]];
-    }
-    return headers;
+    return trimmed(CS.Config.apiBase).replace(/\/+$/, '') + path;
   }
 
   /* created_at (ISO 8601, e.g. 2026-08-15T10:00:00Z) → DD.MM.YYYY;
@@ -143,10 +129,13 @@
     return dd + '.' + mm + '.' + d.getFullYear();
   }
 
-  /* rows from Supabase → the board entry shape, sorted by score desc */
-  function normalizeRemote(rows) {
+  /* rows from the server → the board entry shape, sorted by score
+     desc; accepts BOTH the {rows:[...]} envelope and a bare array */
+  function normalizeRemote(payload) {
     const entries = [];
-    if (!Array.isArray(rows)) return entries;
+    const rows = Array.isArray(payload) ? payload
+      : (payload && Array.isArray(payload.rows) ? payload.rows : null);
+    if (!rows) return entries;
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i];
       if (!r || typeof r !== 'object') continue;
@@ -201,20 +190,20 @@
     }
   }
 
-  /* feature T20: one GET of the scores table; onRows(entries) — the
-     array may be empty, null = the request/parse failed */
+  /* feature T20: one GET /api/top; onRows(entries) — the array may
+     be empty, null = the request/parse failed */
   function fetchQuery(url, onRows) {
     netFetch(
       url,
-      { method: 'GET', headers: netHeaders() },
+      { method: 'GET' },
       function (res) {
         if (!res || !res.ok || typeof res.json !== 'function') {
           onRows(null);
           return;
         }
         try {
-          res.json().then(function (rows) {
-            onRows(normalizeRemote(rows));
+          res.json().then(function (payload) {
+            onRows(normalizeRemote(payload));
           }, function () {
             onRows(null);
           });
@@ -229,24 +218,21 @@
   }
 
   /* async global top-10 of the CURRENT season; callback(rows | null),
-     never throws. feature T20: the GET filters season=eq.<month>;
-     until the cloud column exists (the owner's ALTER) the filtered
-     query answers empty or errors — then ONE retry without the
-     filter serves the legacy rows; both empty → null → the caller
-     falls back to the local board */
+     never throws. An empty season answer triggers ONE retry without
+     the filter — the first days of a fresh season serve the previous
+     month's rows instead of an empty board */
   function fetchRemote(callback) {
     const done = typeof callback === 'function' ? callback : function () {};
     if (!isGlobal()) {
       done(null); // local mode: no network at all
       return;
     }
-    const path = '/rest/v1/scores?select=name,score,level,created_at&order=score.desc&limit=10';
-    fetchQuery(endpoint(path + '&season=eq.' + seasonKey()), function (rows) {
+    fetchQuery(endpoint('/api/top?season=' + seasonKey() + '&limit=10'), function (rows) {
       if (rows && rows.length) {
         done(rows);
         return;
       }
-      fetchQuery(endpoint(path), function (all) {
+      fetchQuery(endpoint('/api/top?limit=10'), function (all) {
         done(all && all.length ? all : null);
       });
     });
@@ -261,19 +247,16 @@
     }
     const name = String(entry.name || '').trim().slice(0, NAME_MAX);
     if (!name) {
-      done(false); // the server CHECK would reject it anyway
+      done(false); // the server validation would reject it anyway
       return;
     }
     const score = Number(entry.score);
     const level = Number(entry.level);
     netFetch(
-      endpoint('/rest/v1/scores'),
+      endpoint('/api/score'),
       {
         method: 'POST',
-        headers: netHeaders({
-          'Content-Type': 'application/json',
-          Prefer: 'return=minimal'
-        }),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: name,
           score: positive(score) ? Math.floor(score) : 0,
@@ -293,7 +276,7 @@
   /* ---------- public API ---------- */
 
   CS.Leaderboard = {
-    /* feature T14: true when Supabase credentials are configured */
+    /* feature T14: true when the server address (apiBase) is configured */
     isGlobal: function () {
       return isGlobal();
     },
@@ -320,7 +303,7 @@
     /* insert an entry; false when it does not qualify or the trimmed
        name is empty. The weakest entry is evicted on overflow.
        feature T14: in global mode the record is also mirrored to
-       Supabase fire-and-forget — a network failure changes nothing
+       the game server fire-and-forget — a network failure changes nothing
        locally (submitRemote reports via its own callback). */
     submit: function (entry) {
       if (!entry) return false;

@@ -1,0 +1,50 @@
+# ============================================================
+#   NEON://SNAKE — VPS (Ubuntu + Docker)
+#   Два контейнера:
+#     game  — Node-сервер (API рекордов + WS-реле дуэлей + бот)
+#     caddy — HTTPS-прокси (сертификат Let's Encrypt для
+#             <IP>.sslip.io — домен не нужен)
+#
+#   Перед запуском: cp .env.example .env  и заполнить
+#   PUBLIC_HOST, BOT_TOKEN (см. deploy/README.md)
+# ============================================================
+
+services:
+  game:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - PORT=8080
+      - DATA_DIR=/app/data
+    volumes:
+      - game-data:/app/data
+    expose:
+      - "8080"
+    # бот должен выходить в api.telegram.org, контейнеру нужен DNS
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      - PUBLIC_HOST=${PUBLIC_HOST}
+    volumes:
+      - ./server/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - game
+
+volumes:
+  game-data:
+  caddy-data:
+  caddy-config:

@@ -19,3 +19,11 @@ publish.sh
 *-test.tmp.js
 *.tmp.js
 test.html
+
+# VPS deploy secrets (BOT_TOKEN живёт только на сервере)
+.env
+deploy/known_hosts
+deploy/*.key
+
+# Серверные данные (json-базы)
+server/data/

@@ -1,0 +1,9 @@
+# В образ попадает только server.js/store.js/bot.js + ws (см. Dockerfile),
+# но чистый контекст ускоряет сборку и не тащит мусор на VPS
+.git
+node_modules
+server/data
+server/test
+*.md
+.env
+test.html
