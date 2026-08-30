@@ -1,0 +1,9 @@
+# NEON://SNAKE — Caddy: HTTPS-прокси перед игровым сервером
+# PUBLIC_HOST приходит из .env (например 203-0-113-10.sslip.io);
+# сертификат Let's Encrypt выпускается автоматически при старте.
+{$PUBLIC_HOST} {
+	encode gzip
+
+	# WebSocket /ws и обычный API — в один upstream
+	reverse_proxy game:8080
+}

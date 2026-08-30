@@ -1,13 +1,14 @@
 /* ============================================================
-   NEON://SNAKE — cloud config (feature T14)
-   CS.Config: Supabase credentials for the global leaderboard.
-   Loads first, before every other script — anyone may read it.
+   NEON://SNAKE — конфигурация сервера (VPS, замена Supabase)
+   CS.Config: адреса собственного игрового сервера.
+   Загружается первым, до всех остальных скриптов.
 
-   ПУСТЫЕ СТРОКИ = локальный режим (как сейчас): таблица лидеров
-   живёт в localStorage, сеть не трогается вовсе, файл можно
-   открывать через file://. Заполняется при подключении облака:
-   Supabase → Project Settings → API → URL + anon public key
-   (и выполнить supabase.sql из корня проекта).
+   ПУСТЫЕ СТРОКИ = локальный режим: таблица лидеров живёт в
+   localStorage, дуэли недоступны, сеть не трогается вовсе,
+   файл можно открывать через file://.
+
+   apiBase — HTTPS-адрес API (например https://203-0-113-10.sslip.io)
+   wsUrl   — WebSocket-адрес реле дуэлей (wss://…/ws)
    ============================================================ */
 (function () {
   'use strict';
@@ -15,8 +16,7 @@
   const CS = window.CS = window.CS || {};
 
   CS.Config = {
-    /* заполняется при подключении облака (Supabase: Settings → API) */
-    supabaseUrl: 'https://fjpwljcsumnabuymynpk.supabase.co',
-    supabaseKey: 'sb_publishable_ccfXAKoH5QhqVuTNxs6UUA_B83qU8WV'
+    apiBase: '',
+    wsUrl: ''
   };
 })();

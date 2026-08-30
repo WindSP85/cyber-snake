@@ -1,15 +1,20 @@
 /* ============================================================
-   NEON://SNAKE — realtime transport for online duels (feature T22,
-   SPEC §22)
-   CS.Net: thin Supabase Realtime wrapper for 1×1 rooms — rooms,
-   broadcast, presence. HOST/GUEST LOGIC LIVES ELSEWHERE (T23):
+   NEON://SNAKE — realtime transport for online duels (T22,
+   SPEC §22; VPS-редакция: чистый WebSocket вместо Supabase)
+   CS.Net: thin WebSocket wrapper for 1×1 rooms — join, message
+   relay, presence. HOST/GUEST LOGIC LIVES ELSEWHERE (T23):
    this file is a pure transport, it knows nothing about the game.
 
-   The supabase-js client is loaded DYNAMICALLY and only on demand
-   (the second documented CDN exception in AGENTS.md): the offline /
-   file:// game never touches the network. With no CS.Config
-   credentials every call degrades into a silent 'no_client' and no
-   exception ever escapes this module.
+   Один собственный сервер (server/server.js, Docker на VPS):
+   - join → сервер держит комнату, третий игрок получает 'full'
+   - msg   → сервер релеирует всем, КРОМЕ отправителя
+   - presence → полный состав комнаты при каждом изменении
+   Сокет умирает вместе со страницей — presence честное и
+   мгновенное, никаких сторонних heartbeat-механик.
+
+   With no CS.Config.wsUrl every call degrades into a silent
+   'no_client' and no exception ever escapes this module:
+   the offline / file:// game never touches the network.
    ============================================================ */
 (function () {
   'use strict';
@@ -18,31 +23,27 @@
 
   /* ---------- constants ---------- */
 
-  const CDN_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
-  const LOAD_TIMEOUT = 10000;   // client download budget, ms
-  const JOIN_TIMEOUT = 10000;   // subscribe + first presence budget, ms
+  const JOIN_TIMEOUT = 10000;   // connect + server 'joined' budget, ms
+  const KEEPALIVE_EVERY = 12000; // app-level ping, keeps NAT alive
   const ROOM_LEN = 4;           // room code length
   const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I
   const ID_LEN = 8;             // random session id length
   const NAME_MAX = 20;          // player name length limit (like T10)
   const NAME_KEY = 'cs_name';   // the same nick the leaderboard saves
-  const MAX_FOREIGN = 2;        // 2 strangers already inside → room full
-  const EVENT = 'duel';         // the single broadcast event; game
-                                // semantics travel in payload.type
 
   /* ---------- state ---------- */
 
-  let client = null;        // cached supabase-js client
-  let clientLoading = false;
-  let loadCbs = [];         // pending ensureClient callbacks
+  let socket = null;        // the single room WebSocket
   let status = 'idle';      // 'idle' | 'loading' | 'connected' | 'error'
-  let channel = null;       // current realtime channel
   let roomCode = '';
   let myId = '';            // random id, one per page session
   let myName = 'PLAYER';
   let joinSettled = true;   // false while a join() is pending
   let joinDone = null;      // the pending join callback
   let joinTimer = 0;
+  let keepaliveTimer = 0;
+  let generation = 0;       // every join() gets its own; stale
+                           // socket events from a previous room die here
   const msgCbs = [];        // onMessage listeners
   const presenceCbs = [];   // onPresence listeners
 
@@ -52,11 +53,11 @@
     return String(value || '').trim();
   }
 
-  /* both credentials filled → the cloud is wired up (like T14) */
+  /* the server address in CS.Config.wsUrl → duels are wired up */
   function isConfigured() {
     const cfg = CS.Config;
     if (!cfg) return false;
-    return !!trimmed(cfg.supabaseUrl) && !!trimmed(cfg.supabaseKey);
+    return !!trimmed(cfg.wsUrl);
   }
 
   /* crypto-based index when available, Math.random otherwise */
@@ -110,170 +111,43 @@
     myName = 'PLAYER';
   }
 
-  /* swallow a maybe-promise so a rejected send/unsubscribe never
-     becomes an unhandled rejection */
-  function eat(promise) {
+  function sendRaw(obj) {
     try {
-      if (promise && typeof promise.catch === 'function') {
-        promise.catch(function () { /* network noise: ignore */ });
+      if (socket && socket.readyState === 1) { // OPEN
+        socket.send(JSON.stringify(obj));
+        return true;
       }
     } catch (e) {
-      /* not a promise: nothing to do */
+      /* a dead socket resolves into the close handler below */
     }
-  }
-
-  /* ---------- client loading (the only network touchpoint) ---------- */
-
-  function ensureClient(cb) {
-    const done = typeof cb === 'function' ? cb : function () {};
-    try {
-      if (client) {
-        done(true); // cached
-        return;
-      }
-      if (!isConfigured()) {
-        done(false); // local mode: no network at all
-        return;
-      }
-      loadCbs.push(done);
-      if (clientLoading) return;
-      clientLoading = true;
-      status = 'loading';
-
-      let settled = false;
-      let timer = 0;
-      const script = document.createElement('script');
-      const finish = function (ok) {
-        if (settled) return;
-        settled = true;
-        if (timer) window.clearTimeout(timer);
-        clientLoading = false;
-        if (!ok) {
-          status = 'error';
-          try {
-            if (script.parentNode && typeof script.parentNode.removeChild === 'function') {
-              script.parentNode.removeChild(script);
-            }
-          } catch (e) {
-            /* the dead tag is harmless */
-          }
-        } else {
-          status = 'idle'; // client ready, not connected anywhere yet
-        }
-        const cbs = loadCbs.splice(0, loadCbs.length);
-        for (let i = 0; i < cbs.length; i++) {
-          try { cbs[i](ok); } catch (e) { /* a broken callback changes nothing */ }
-        }
-      };
-
-      timer = window.setTimeout(function () {
-        finish(false); // CDN unreachable / offline
-      }, LOAD_TIMEOUT);
-
-      script.onload = function () {
-        try {
-          const lib = window.supabase;
-          if (!lib || typeof lib.createClient !== 'function') {
-            finish(false);
-            return;
-          }
-          client = lib.createClient(
-            trimmed(CS.Config.supabaseUrl),
-            trimmed(CS.Config.supabaseKey)
-          );
-          finish(!!client);
-        } catch (e) {
-          finish(false);
-        }
-      };
-      script.onerror = function () {
-        finish(false);
-      };
-      script.async = true;
-      const host = document.head || document.body || document.documentElement;
-      if (!host || typeof host.appendChild !== 'function') {
-        finish(false); // no DOM to attach the tag to
-        return;
-      }
-      script.src = CDN_URL;
-      host.appendChild(script);
-    } catch (e) {
-      clientLoading = false;
-      status = 'error';
-      loadCbs = []; // nothing is loading anymore: drop the queue
-      try { done(false); } catch (e2) { /* nothing more to do */ }
-    }
+    return false;
   }
 
   /* ---------- presence plumbing ---------- */
 
-  /* the full CURRENT participant list rebuilt from presenceState()
-     (the source of truth) — [{id, name, online, self}] */
-  function presenceList() {
-    const list = [];
-    try {
-      const state = channel && typeof channel.presenceState === 'function'
-        ? channel.presenceState()
-        : null;
-      if (!state) return list;
-      for (const key in state) {
-        if (!Object.prototype.hasOwnProperty.call(state, key)) continue;
-        const metas = state[key];
-        const meta = Array.isArray(metas) && metas.length && typeof metas[0] === 'object'
-          ? metas[0]
-          : {};
-        list.push({
-          id: String(key),
-          name: String(meta.name || 'PLAYER').slice(0, NAME_MAX),
-          online: true,
-          self: String(key) === myId
-        });
-      }
-    } catch (e) {
-      /* a broken presence state just yields what we managed to read */
+  /* the server list [{id, name}] → the API shape [{id, name,
+     online, self}] every consumer already understands */
+  function emitPresence(list) {
+    const snapshot = [];
+    const arr = Array.isArray(list) ? list : [];
+    for (let i = 0; i < arr.length; i++) {
+      snapshot.push({
+        id: String(arr[i].id || ''),
+        name: String(arr[i].name || 'PLAYER').slice(0, NAME_MAX),
+        online: true,
+        self: String(arr[i].id || '') === myId
+      });
     }
-    return list;
-  }
-
-  function emitPresence(list, diff) {
-    const snapshot = list.slice();
-    const info = { joined: (diff && diff.joined || []).slice(), left: (diff && diff.left || []).slice() };
+    const ids = snapshot.map(function (x) { return x.id; });
+    const info = { joined: ids, left: [] }; // membership DIFF details
+    // are not needed downstream: every consumer re-reads the full list
     const cbs = presenceCbs.slice();
     for (let i = 0; i < cbs.length; i++) {
       try { cbs[i](snapshot, info); } catch (e) { /* a broken listener must not break the room */ }
     }
   }
 
-  /* every presence event re-emits the full actualized list; while a
-     join() is still pending the same list decides 'full' */
-  function handlePresence(diff) {
-    const list = presenceList();
-    if (!joinSettled) {
-      let foreign = 0;
-      for (let i = 0; i < list.length; i++) {
-        if (list[i].id !== myId) foreign++;
-      }
-      if (foreign >= MAX_FOREIGN) {
-        settleJoin({ ok: false, error: 'full' });
-        return;
-      }
-      settleJoin({ ok: true }); // first sync: we are in, room not overfull
-    }
-    emitPresence(list, diff);
-  }
-
-  function diffKeys(evt) {
-    try {
-      if (evt && typeof evt === 'object' && typeof evt.key === 'string' && evt.key) {
-        return [evt.key];
-      }
-    } catch (e) {
-      /* unexpected shape: no diff info */
-    }
-    return [];
-  }
-
-  /* ---------- channel lifecycle ---------- */
+  /* ---------- socket lifecycle ---------- */
 
   function settleJoin(res) {
     if (joinSettled) return;
@@ -283,9 +157,9 @@
       joinTimer = 0;
     }
     status = res && res.ok ? 'connected' : 'error';
-    const done = joinDone; // grab BEFORE cleanupChannel() wipes it
+    const done = joinDone; // grab BEFORE cleanupSocket() wipes it
     joinDone = null;
-    if (!res || !res.ok) cleanupChannel();
+    if (!res || !res.ok) cleanupSocket();
     if (typeof done === 'function') {
       try { done(res); } catch (e) { /* the caller's callback is its own problem */ }
     }
@@ -293,9 +167,13 @@
 
   /* silent teardown: no callbacks, no presence emission; repeat
      join() after this is fully supported */
-  function cleanupChannel() {
-    const ch = channel;
-    channel = null;
+  function cleanupSocket() {
+    if (keepaliveTimer) {
+      window.clearInterval(keepaliveTimer);
+      keepaliveTimer = 0;
+    }
+    const ws = socket;
+    socket = null;
     roomCode = '';
     joinSettled = true;
     joinDone = null;
@@ -303,45 +181,26 @@
       window.clearTimeout(joinTimer);
       joinTimer = 0;
     }
-    if (!ch) return;
-    try {
-      if (typeof ch.unsubscribe === 'function') eat(ch.unsubscribe());
-    } catch (e) {
-      /* already gone */
-    }
-    try {
-      if (client && typeof client.removeChannel === 'function') {
-        eat(client.removeChannel(ch));
+    if (ws) {
+      try { ws.onclose = null; } catch (e) { /* already gone */ }
+      try { ws.onerror = null; } catch (e) { /* already gone */ }
+      try { ws.onmessage = null; } catch (e) { /* already gone */ }
+      try {
+        if (ws.readyState === 0 || ws.readyState === 1) ws.close();
+      } catch (e) {
+        /* already gone */
       }
-    } catch (e) {
-      /* already gone */
-    }
-  }
-
-  function onBroadcast(msg) {
-    try {
-      const p = msg && typeof msg === 'object' ? msg.payload : null;
-      if (!p || typeof p !== 'object') return;
-      if (p.from === myId) return; // self:false already cuts it; a spare belt
-      const cbs = msgCbs.slice();
-      for (let i = 0; i < cbs.length; i++) {
-        try {
-          cbs[i](String(p.type), p.data === undefined ? null : p.data, p.from);
-        } catch (e) {
-          /* a broken listener must not break the transport */
-        }
-      }
-    } catch (e) {
-      /* malformed payload: drop it silently */
     }
   }
 
   /* ---------- public API ---------- */
 
-  /* cb(ok bool); loads supabase-js from the CDN exactly once, on
-     demand only; false on no config / no network / 10s timeout */
+  /* cb(ok bool); with a configured server this is instant — the
+     native WebSocket needs no library download. false = local
+     mode (no wsUrl): duels are simply unavailable */
   function ensureClientApi(cb) {
-    ensureClient(cb);
+    const done = typeof cb === 'function' ? cb : function () {};
+    done(isConfigured());
   }
 
   /* cb({ok, code}) — a fresh 4-char room code from the unambiguous
@@ -349,7 +208,7 @@
   function createRoom(cb) {
     const done = typeof cb === 'function' ? cb : function () {};
     try {
-      ensureClient(function (ok) {
+      ensureClientApi(function (ok) {
         if (!ok) {
           done({ ok: false, error: 'no_client' });
           return;
@@ -362,91 +221,124 @@
   }
 
   /* cb({ok, error?}) with error ∈ 'no_client' | 'timeout' | 'full';
-     joins the `room-<code>` broadcast+presence channel */
+     opens the WebSocket, sends 'join' and waits for the verdict */
   function join(code, cb) {
     const done = typeof cb === 'function' ? cb : function () {};
     try {
       const norm = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-      if (!norm) {
+      if (!norm || !isConfigured()) {
         done({ ok: false, error: 'no_client' }); // nothing to dial
         return;
       }
-      ensureClient(function (ok) {
-        if (!ok) {
-          done({ ok: false, error: 'no_client' });
+      try {
+        cleanupSocket(); // a repeat join silently drops the old room
+        ensureIds();
+      } catch (e) {
+        done({ ok: false, error: 'no_client' });
+        return;
+      }
+
+      const gen = ++generation;
+      joinDone = done;
+      joinSettled = false;
+      roomCode = norm;
+      status = 'loading';
+
+      let ws = null;
+      try {
+        ws = new window.WebSocket(trimmed(CS.Config.wsUrl));
+      } catch (e) {
+        settleJoin({ ok: false, error: 'timeout' });
+        return;
+      }
+      socket = ws;
+
+      joinTimer = window.setTimeout(function () {
+        if (gen === generation) settleJoin({ ok: false, error: 'timeout' });
+      }, JOIN_TIMEOUT);
+
+      ws.onopen = function () {
+        if (gen !== generation) return;
+        sendRaw({ t: 'join', room: roomCode, id: myId, name: myName });
+      };
+      ws.onerror = function () {
+        if (gen !== generation) return;
+        settleJoin({ ok: false, error: 'timeout' });
+      };
+      ws.onclose = function () {
+        if (gen !== generation) return;
+        if (status === 'connected') {
+          // a live room died (network drop): report the empty room
+          cleanupSocket();
+          status = 'idle';
+          emitPresence([]);
+        } else {
+          settleJoin({ ok: false, error: 'timeout' });
+        }
+      };
+      ws.onmessage = function (evt) {
+        if (gen !== generation) return;
+        let msg = null;
+        try {
+          msg = JSON.parse(String(evt && evt.data));
+        } catch (e) {
+          return; // the server never sends garbage; ignore anyway
+        }
+        if (!msg || typeof msg !== 'object') return;
+
+        if (msg.t === 'joined') {
+          if (msg.ok) {
+            settleJoin({ ok: true });
+            // the server follows with the first 'presence' itself
+          } else {
+            settleJoin({ ok: false, error: msg.error === 'full' ? 'full' : 'timeout' });
+          }
           return;
         }
-        try {
-          cleanupChannel(); // a repeat join silently drops the old room
-          ensureIds();
-          joinDone = done;
-          joinSettled = false;
-          roomCode = norm;
-          status = 'loading';
 
-          channel = client.channel('room-' + norm, {
-            config: {
-              broadcast: { self: false },
-              presence: { key: myId }
-            }
-          });
-          if (typeof channel.on === 'function') {
-            channel.on('broadcast', { event: EVENT }, onBroadcast);
-            channel.on('presence', { event: 'sync' }, function () {
-              handlePresence({ joined: [], left: [] });
-            });
-            channel.on('presence', { event: 'join' }, function (evt) {
-              handlePresence({ joined: diffKeys(evt), left: [] });
-            });
-            channel.on('presence', { event: 'leave' }, function (evt) {
-              handlePresence({ joined: [], left: diffKeys(evt) });
-            });
-          }
-          if (typeof channel.subscribe !== 'function') {
-            settleJoin({ ok: false, error: 'timeout' });
-            return;
-          }
-          joinTimer = window.setTimeout(function () {
-            settleJoin({ ok: false, error: 'timeout' });
-          }, JOIN_TIMEOUT);
-          channel.subscribe(function (st) {
-            if (st === 'SUBSCRIBED') {
-              try {
-                eat(channel.track({ name: myName }));
-              } catch (e) {
-                /* presence is best effort; broadcast still works */
-              }
-            } else if (st === 'CHANNEL_ERROR' || st === 'TIMED_OUT' || st === 'CLOSED') {
-              settleJoin({ ok: false, error: 'timeout' });
-            }
-          });
-        } catch (e) {
-          done({ ok: false, error: 'timeout' });
-          cleanupChannel();
+        if (msg.t === 'presence') {
+          if (status === 'connected') emitPresence(msg.list);
+          return;
         }
-      });
+
+        if (msg.t === 'msg') {
+          const from = String(msg.from || '');
+          if (from === myId) return; // a spare belt after the server
+          const cbs = msgCbs.slice();
+          for (let i = 0; i < cbs.length; i++) {
+            try {
+              cbs[i](String(msg.type), msg.data === undefined ? null : msg.data, from);
+            } catch (e) {
+              /* a broken listener must not break the transport */
+            }
+          }
+          return;
+        }
+
+        if (msg.t === 'pong') return; // just liveness, nothing to do
+      };
+
+      /* app-level keepalive: NAT routers love dropping idle
+         sockets; 12 s of silence is enough for some of them */
+      keepaliveTimer = window.setInterval(function () {
+        if (gen !== generation) return;
+        sendRaw({ t: 'ping' });
+      }, KEEPALIVE_EVERY);
     } catch (e) {
       done({ ok: false, error: 'no_client' });
     }
   }
 
-  /* fire-and-forget broadcast {type, data, from: myId}; false when
-     not connected */
+  /* fire-and-forget broadcast {type, data}; the server relays it
+     to the OTHER room member. false when not connected */
   function send(type, data) {
     try {
-      if (!channel || status !== 'connected' || typeof channel.send !== 'function') {
-        return false;
-      }
-      eat(channel.send({
-        type: 'broadcast',
-        event: EVENT,
-        payload: {
-          type: String(type),
-          data: data === undefined ? null : data,
-          from: myId
-        }
-      }));
-      return true;
+      if (!socket || status !== 'connected') return false;
+      return sendRaw({
+        t: 'msg',
+        type: String(type),
+        data: data === undefined ? null : data
+      });
     } catch (e) {
       return false;
     }
@@ -458,36 +350,24 @@
   }
 
   /* cb(list, diff): list — the full actual [{id, name, online,
-     self}] snapshot; diff — {joined, left} ids of the event that
-     triggered the emission (a leave → the rival drop check) */
+     self}] snapshot; diff — {joined, left} of the triggering event */
   function onPresence(cb) {
     if (typeof cb === 'function') presenceCbs.push(cb);
   }
 
-  /* realtime presence heartbeats on its own (track above); this is
-     an explicit liveness re-pulse for the SPEC §22 rival-drop check */
+  /* the socket itself is the liveness now (server pings it);
+     this stays as an explicit extra pulse for SPEC §22 */
   function heartbeat() {
-    try {
-      if (!channel || status !== 'connected' || typeof channel.track !== 'function') {
-        return false;
-      }
-      eat(channel.track({ name: myName }));
-      return true;
-    } catch (e) {
-      return false;
-    }
+    return sendRaw({ t: 'ping' });
   }
 
-  /* teardown + reset; listeners stay registered, join() works again */
+  /* teardown + reset; listeners stay registered, join() works again.
+     A game-level farewell ('bye') is the CALLER's business (duelui
+     already sends it before calling this) */
   function leave() {
-    try {
-      settleJoin({ ok: false, error: 'timeout' }); // unhang a pending join()
-    } catch (e) {
-      /* nothing pending */
-    }
-    cleanupChannel();
+    cleanupSocket();
     status = 'idle';
-    emitPresence([], { joined: [], left: [] }); // the room is empty now
+    emitPresence([]); // the room is empty now
   }
 
   /* debug: {status, roomCode} */
