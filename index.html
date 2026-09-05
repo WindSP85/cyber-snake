@@ -271,6 +271,23 @@
           <input id="duel-link-copy" class="duel-link-copy hidden" type="text" readonly>
         </div>
 
+        <!-- SPEC §28: живая комната — обе строки игроков + готовность;
+             бой стартует сам, когда ГОТОВЫ ОБА -->
+        <div id="duel-room-live" class="duel-room-live hidden">
+          <div class="duel-players">
+            <div class="duel-player duel-player-me">
+              <span class="duel-player-name" data-i18n="duelYouAre">ВЫ — СИНЯЯ ЗМЕЙКА</span>
+              <span id="me-ready" class="ready-badge"></span>
+            </div>
+            <div id="foe-player" class="duel-player hidden">
+              <span id="foe-player-name" class="duel-player-name"></span>
+              <span id="foe-ready" class="ready-badge"></span>
+            </div>
+          </div>
+          <p id="duel-ready-hint" class="duel-ready-hint hidden"></p>
+          <button id="btn-duel-ready" class="btn btn-primary" type="button" data-i18n="duelReady">ГОТОВ К БОЮ</button>
+        </div>
+
         <!-- (b) join by code -->
         <div id="duel-join-block" class="duel-block">
           <p class="duel-label" data-i18n="duelJoin">ВОЙТИ ПО КОДУ</p>

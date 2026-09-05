@@ -69,6 +69,8 @@
   let foeCauses = [];       // ПВП: способы побед соперника
   let seenStatuses = null;  // ПВП: какие статусы уже видели (тост «новый»)
   let pvpTimer = 0;         // ПВП: таймаут загрузки рейтинга
+  let myReady = false;      // SPEC §28: «ГОТОВ К БОЮ» нажат мной
+  let foeReady = false;     // соперник нажал «ГОТОВ К БОЮ»
 
   /* ---------- dom / i18n helpers ---------- */
 
@@ -268,6 +270,7 @@
     setError(null);
     setWait(false);
     show('duel-room', false);
+    show('duel-room-live', false); // SPEC §28: панель готовности — только в комнате
     show('duel-create-block', true);
     show('duel-join-block', true);
     show('duel-lobby-block', true); // SPEC §28: список ждущих виден в лобби
@@ -523,6 +526,8 @@
     foeGone = false;
     myCauses = [];
     foeCauses = [];
+    myReady = false;
+    foeReady = false;
     stopLobbyWatch(); // в комнате список ждущих не нужен
     setError(null);
     if (role === 'host') {
@@ -543,6 +548,7 @@
       const goBtn = byId('btn-duel-go');
       if (goBtn) goBtn.disabled = true;
     }
+    renderReadyUi(); // панель игроков + «ГОТОВ К БОЮ» (SPEC §28)
     setWait(true);
     const tok = flow;
     CS.Net.join(code, function (res) {
@@ -553,8 +559,63 @@
         return;
       }
       connected = true;
+      show('duel-room-live', true);
+      renderReadyUi();
       if (mode === 'guest') netSend('hello', null); // the name is in presence
     }, { open: !!open }); // SPEC §28: хост создаёт «открытую» комнату
+  }
+
+  /* ---------- SPEC §28: панель готовности в комнате ---------- */
+
+  /* обе строки (я + соперник) с бейджами ГОТОВ/НЕ ГОТОВ; кнопка
+     «ГОТОВ К БОЮ» / «ГОТОВ! ЖДЁМ СОПЕРНИКА…»; подсказка, если
+     соперник уже готов */
+  function renderReadyUi() {
+    const btn = byId('btn-duel-ready');
+    const hint = byId('duel-ready-hint');
+    const meBadge = byId('me-ready');
+    const foeRow = byId('foe-player');
+    const foeBadge = byId('foe-ready');
+    if (btn) {
+      btn.disabled = !connected || myReady || inMatch();
+      btn.textContent = myReady ? t('duelReadyWait') : t('duelReady');
+    }
+    if (meBadge) {
+      meBadge.textContent = myReady ? t('duelReadyBadge') : t('duelNotReady');
+      meBadge.className = 'ready-badge' + (myReady ? ' ready-on' : '');
+    }
+    const foeHere = mode !== 'idle' && connected && foeName && !inMatch() && !foeGone;
+    if (foeRow) {
+      foeRow.classList.toggle('hidden', !foeHere);
+      if (foeHere) setText('foe-player-name', foeName);
+    }
+    if (foeBadge) {
+      foeBadge.textContent = foeReady ? t('duelReadyBadge') : t('duelNotReady');
+      foeBadge.className = 'ready-badge' + (foeReady ? ' ready-on' : '');
+    }
+    if (hint) {
+      const show = foeHere && foeReady && !myReady;
+      hint.classList.toggle('hidden', !show);
+      if (show) hint.textContent = t('duelFoeReady');
+    }
+  }
+
+  /* «ГОТОВ К БОЮ»: флаг себе, сообщение сопернику; хост при двух
+     флагах стартует матч сам */
+  function onReady() {
+    if (!connected || myReady || inMatch() || mode === 'idle') return;
+    myReady = true;
+    netSend('ready', null);
+    renderReadyUi();
+    if (CS.TG && typeof CS.TG.haptic === 'function') CS.TG.haptic('click');
+    maybeAutoStart();
+  }
+
+  /* старт срабатывает один раз: оба готовы и мы хост */
+  function maybeAutoStart() {
+    if (mode === 'host' && myReady && foeReady && !inMatch() && !started) {
+      startMatch();
+    }
   }
 
   /* ---------- the match ---------- */
@@ -577,6 +638,7 @@
     setError(null);
     setWait(false);
     show('duel-room', false);
+    show('duel-room-live', false);
     show('duel-youare', false);
     if (CS.UI && typeof CS.UI.show === 'function') CS.UI.show('game');
     if (CS.Duel && typeof CS.Duel.setRivalName === 'function') {
@@ -888,18 +950,20 @@
       } else if (ended && !foeGone) {
         foeGone = true;
         lockRematchButton(); // the rival is gone: no rematch can happen
+      } else if (!inMatch()) {
+        /* соперник ушёл до боя: его строка и флаг готовности гаснут */
+        foeReady = false;
+        foeName = '';
+        renderReadyUi();
       }
       return;
     }
-    /* host: the rival arrived (presence >= 2) -> громкое «можно
-       запускать» + авто-старт (SPEC §28) */
-    if (!inMatch() && !ended && mode === 'host' && connected && others >= 1) {
-      if (CS.UI && typeof CS.UI.toast === 'function') {
-        CS.UI.toast(t('lobbyRivalFound'));
-      }
-      if (CS.TG && typeof CS.TG.haptic === 'function') CS.TG.haptic('success');
-      if (CS.Audio && typeof CS.Audio.sfx === 'function') CS.Audio.sfx('levelup');
-      startMatch();
+    /* SPEC §28: соперник в комнате — показать его строку; если я уже
+       ГОТОВ, повторно сообщаю флаг новичку; старт — только по двум
+       флагам (maybeAutoStart) */
+    if (!inMatch() && !ended && connected && others >= 1) {
+      renderReadyUi();
+      if (myReady) netSend('ready', null); // переподключившемуся/новичку
     }
   }
 
@@ -925,6 +989,14 @@
         else if (k === 'dHead') foeCauses.push('headon');
         else if (k === 'dCrash') foeCauses.push('crash');
       }
+      return;
+    }
+    if (type === 'ready') {
+      /* SPEC §28: соперник нажал «ГОТОВ К БОЮ» */
+      foeReady = true;
+      renderReadyUi();
+      if (CS.TG && typeof CS.TG.haptic === 'function') CS.TG.haptic('success');
+      maybeAutoStart();
       return;
     }
     if (type === 'rematch') {
@@ -1080,6 +1152,7 @@
     bind('btn-duel-invite', onInvite);
     bind('btn-duel-copy', onCopy);
     bind('btn-duel-go', onGo);
+    bind('btn-duel-ready', onReady); // SPEC §28: проверка готовности
     bind('btn-duel-back', toMenu);
     bind('btn-duel-rematch', onRematch);
     bind('btn-duel-exit', exitAfterMatch);

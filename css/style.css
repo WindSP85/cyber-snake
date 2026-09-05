@@ -2436,3 +2436,60 @@ body.in-telegram .tg-only {
   user-select: none;
   -webkit-user-select: none;
 }
+
+/* SPEC §28: живая комната — строки игроков + готовность */
+.duel-room-live {
+  margin: 0 0 12px;
+}
+
+.duel-players {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.duel-player {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(0, 240, 255, .4);
+  background: rgba(0, 240, 255, .04);
+  font-size: 14px;
+}
+
+.duel-player-me {
+  border-color: rgba(0, 240, 255, .8);
+  color: var(--cyan);
+}
+
+.duel-player-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ready-badge {
+  flex: none;
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 3px 8px;
+  border: 1px solid rgba(125, 227, 255, .3);
+  color: var(--dim);
+}
+
+.ready-badge.ready-on {
+  border-color: rgba(0, 255, 157, .8);
+  color: #00ff9d;
+  text-shadow: 0 0 8px rgba(0, 255, 157, .5);
+  box-shadow: 0 0 12px rgba(0, 255, 157, .2);
+}
+
+.duel-ready-hint {
+  margin: 6px 0;
+  font-size: 13px;
+  color: #00ff9d;
+  text-shadow: 0 0 8px rgba(0, 255, 157, .4);
+}
