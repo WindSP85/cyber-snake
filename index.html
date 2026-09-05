@@ -346,10 +346,6 @@
       </div>
     </div>
 
-    <!-- build version: ui.js подставит CS.Config.build — крупнее
-         субтитла, чтобы нельзя было перепутать с «v2.077» -->
-    <span class="ver-badge" aria-hidden="true"></span>
-
     <!-- CRT overlays (SPEC §6) -->
     <div class="noise" aria-hidden="true"></div>
     <div class="scanlines" aria-hidden="true"></div>
@@ -401,5 +397,7 @@
   <!-- feature T24: the duel lobby ui (SPEC §22) — after ui, before game -->
   <script src="js/duelui.js"></script>
   <script src="js/game.js"></script>
+  <!-- build version: последний элемент body, поверх всего остального -->
+  <span class="ver-badge" aria-hidden="true"></span>
 </body>
 </html>
