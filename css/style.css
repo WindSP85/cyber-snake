@@ -16,6 +16,9 @@
   --green: #00ff9d;
   --grid-line: rgba(0, 240, 255, .07);
   --text: #d7f7ff;
+  --dim: rgba(125, 227, 255, .55);
+  --pink: var(--magenta);
+  --fg: var(--text);
   --font: 'Cascadia Mono', 'Consolas', 'Courier New', monospace;
 }
 
@@ -147,17 +150,25 @@ body::before {
   gap: 8px;
 }
 
-/* ---------- Buttons: neon frames, hover fill + glow ---------- */
+/* ---------- Buttons: единая система — одна геометрия, акцент цветом.
+   База 48px; .btn-xl 58px — ровно одна главная кнопка на экран;
+   .btn-small — только инлайн-утилиты внутри строк (например, копирование) ---------- */
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-family: var(--font);
-  font-size: 15px;
-  letter-spacing: 2px;
+  font-size: 14px;
+  letter-spacing: 1.5px;
   text-transform: uppercase;
+  line-height: 1.2;
+  text-align: center;
   color: var(--cyan);
   background: rgba(0, 240, 255, .04);
   border: 1px solid rgba(0, 240, 255, .7);
-  padding: 11px 26px;
+  min-height: 48px;
+  padding: 10px 18px;
   cursor: pointer;
   text-shadow: 0 0 8px rgba(0, 240, 255, .6);
   box-shadow:
@@ -187,6 +198,19 @@ body::before {
   box-shadow:
     0 0 10px rgba(255, 43, 214, .2),
     inset 0 0 10px rgba(255, 43, 214, .06);
+}
+
+.btn:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.btn:disabled:hover,
+.btn:disabled:focus-visible {
+  background: rgba(0, 240, 255, .04);
+  box-shadow:
+    0 0 10px rgba(0, 240, 255, .18),
+    inset 0 0 10px rgba(0, 240, 255, .06);
 }
 
 .btn-primary:hover,
@@ -399,10 +423,27 @@ body::before {
 
 .menu-buttons {
   display: flex;
-  gap: 14px;
+  gap: 10px;
   justify-content: center;
+  align-items: stretch;
   flex-wrap: wrap;
   margin-bottom: 18px;
+}
+
+/* вторичные пункты меню — сетка одинаковых кнопок 2 в ряд */
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  width: min(100%, 380px);
+  margin: 0 auto;
+}
+
+.menu-grid .btn {
+  width: 100%;
+  padding: 10px 8px;
+  font-size: 12px;
+  letter-spacing: 1px;
 }
 
 .hint {
@@ -888,10 +929,11 @@ body::before {
   line-height: 1.4;
 }
 
-/* compact 🌐 button next to the menu buttons */
+/* compact 🌐 button under the menu grid: та же высота 48px, компактная */
 #btn-lang {
-  padding: 11px 14px;
-  font-size: 16px;
+  min-width: 64px;
+  padding: 10px 0;
+  font-size: 17px;
   letter-spacing: 0;
 }
 
@@ -1006,7 +1048,8 @@ body::before {
 
 /* small danger-tinted "Clear" (double-click confirm) */
 .btn-small {
-  padding: 8px 16px;
+  min-height: 40px;
+  padding: 7px 14px;
   font-size: 12px;
   letter-spacing: 1px;
 }
@@ -1234,8 +1277,32 @@ body::before {
 
   .menu-buttons .btn {
     width: 100%;
-    padding: 13px 18px;
+    padding: 12px 16px;
     font-size: 14px;
+  }
+
+  /* сетка и «🌐» тянутся на всю колонку меню */
+  .menu-grid {
+    width: 100%;
+  }
+
+  .menu-grid .btn {
+    font-size: 12px;
+    padding: 10px 8px;
+  }
+
+  #btn-lang {
+    width: 72px;
+    margin: 0 auto;
+  }
+
+  /* одинаковые полноширинные кнопки по всем экранам */
+  .panel > .btn {
+    width: 100%;
+  }
+
+  .board-buttons {
+    flex-direction: column;
   }
 
   .lang-buttons {
@@ -1740,7 +1807,7 @@ body.in-telegram .tg-only {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  align-items: center;
+  align-items: stretch;
   margin-bottom: 14px;
 }
 
@@ -1750,6 +1817,7 @@ body.in-telegram .tg-only {
   font-weight: 700;
   letter-spacing: 3px;
   text-transform: uppercase;
+  text-align: left;
   color: rgba(0, 240, 255, .65);
 }
 
@@ -1793,33 +1861,8 @@ body.in-telegram .tg-only {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  align-items: center;
+  align-items: stretch;
   margin: 0 0 16px;
-}
-
-/* the room code: one HUGE letter per yellow plate */
-.duel-code {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-}
-
-.duel-char {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: clamp(52px, 12vw, 84px);
-  height: clamp(64px, 15vw, 104px);
-  font-size: clamp(40px, 9vw, 72px);
-  font-weight: 700;
-  line-height: 1;
-  color: var(--yellow);
-  background: rgba(4, 5, 12, .7);
-  border: 1px solid rgba(255, 230, 0, .7);
-  text-shadow: 0 0 18px rgba(255, 230, 0, .7);
-  box-shadow:
-    0 0 18px rgba(255, 230, 0, .2),
-    inset 0 0 14px rgba(255, 230, 0, .07);
 }
 
 /* the deep-link line under the code */
@@ -1839,6 +1882,10 @@ body.in-telegram .tg-only {
   justify-content: center;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.duel-actions .btn {
+  width: 100%;
 }
 
 /* the «СКОПИРОВАНО» flash next to the copy button */
@@ -1996,7 +2043,7 @@ body.in-telegram .tg-only {
 
 /* the «МОИ БОИ» peek under the join-by-code block */
 .duel-battles-btn {
-  margin-bottom: 14px;
+  width: 100%;
 }
 
 /* the «🔥 N ПОДРЯД» badge under the lobby role line */
@@ -2183,74 +2230,23 @@ body.in-telegram .tg-only {
 }
 
 
-/* SPEC §28: живая комната — строки игроков + готовность */
-.duel-room-live {
-  margin: 0 0 12px;
-}
-
-.duel-players {
+/* SPEC §28: VS-комната — одна колонка: состав → код → готовность */
+.vs-room {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin: 0 0 8px;
-}
-
-.duel-player {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 12px;
-  border: 1px solid rgba(0, 240, 255, .4);
-  background: rgba(0, 240, 255, .04);
-  font-size: 14px;
-}
-
-.duel-player-me {
-  border-color: rgba(0, 240, 255, .8);
-  color: var(--cyan);
-}
-
-.duel-player-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ready-badge {
-  flex: none;
-  font-size: 11px;
-  letter-spacing: 1px;
-  padding: 3px 8px;
-  border: 1px solid rgba(125, 227, 255, .3);
-  color: var(--dim);
-}
-
-.ready-badge.ready-on {
-  border-color: rgba(0, 255, 157, .8);
-  color: #00ff9d;
-  text-shadow: 0 0 8px rgba(0, 255, 157, .5);
-  box-shadow: 0 0 12px rgba(0, 255, 157, .2);
-}
-
-.duel-ready-hint {
-  margin: 6px 0;
-  font-size: 13px;
-  color: #00ff9d;
-  text-shadow: 0 0 8px rgba(0, 255, 157, .4);
+  gap: 12px;
 }
 
 /* ============================================================
    SPEC §28 v2: лобби и VS-комната — карточный дизайн
    ============================================================ */
 
-/* крупная главная кнопка (одна на экран) */
+/* главная кнопка экрана: та же система, чуть выше и громче */
 .btn-xl {
   min-height: 58px;
-  font-size: 19px;
-  letter-spacing: 2px;
   width: 100%;
-  margin-bottom: 14px;
+  font-size: 16px;
+  letter-spacing: 2px;
 }
 
 .btn-ready-on {
@@ -2264,6 +2260,16 @@ body.in-telegram .tg-only {
   color: var(--dim);
   border-color: rgba(125, 227, 255, .25);
   background: transparent;
+  text-shadow: none;
+  box-shadow: none;
+}
+
+.btn-ghost:hover,
+.btn-ghost:focus-visible {
+  color: var(--text);
+  border-color: rgba(125, 227, 255, .5);
+  background: rgba(125, 227, 255, .05);
+  box-shadow: none;
 }
 
 /* карточки ждущих: аватар · ник+★рейтинг·W:L · статусы */
@@ -2361,22 +2367,20 @@ body.in-telegram .tg-only {
   width: 100%;
 }
 
-/* второстепенная зона: код + история, тише главного */
-.duel-secondary {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin: 4px 0 10px;
-}
-
+/* вход по коду: поле и кнопка одной высоты — единый композит-контрол */
 .duel-join-inline {
-  flex: 1;
   display: flex;
   gap: 8px;
+  width: 100%;
 }
 
 .duel-join-inline .duel-code-input {
   flex: 1;
+  min-height: 48px;
+}
+
+.duel-join-inline .btn {
+  min-width: 96px;
 }
 
 /* ── VS-комната ── */
@@ -2406,11 +2410,18 @@ body.in-telegram .tg-only {
   box-shadow: 0 0 16px rgba(255, 138, 0, .12);
 }
 
+/* слот соперника: его место в сетке состава, пока он не пришёл */
 .pcard-slot {
   border-style: dashed;
   border-color: rgba(125, 227, 255, .25);
   background: transparent;
   box-shadow: none;
+}
+
+.pcard-slot .pcard-ava {
+  width: 40px;
+  height: 40px;
+  font-size: 15px;
 }
 
 .pcard-ava {
@@ -2487,13 +2498,14 @@ body.in-telegram .tg-only {
   text-shadow: 0 0 8px rgba(0, 255, 157, .4);
 }
 
-/* код комнаты — компактная строка внутри VS */
+/* код комнаты — компактная строка внутри VS: пластины слева, копия справа */
 .duel-code-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
-  margin: 6px 0 8px;
-  padding: 8px 10px;
+  margin: 0;
+  padding: 9px 12px;
   border: 1px solid rgba(0, 240, 255, .3);
   background: rgba(0, 240, 255, .04);
 }
@@ -2508,13 +2520,21 @@ body.in-telegram .tg-only {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 34px;
-  font-size: 19px;
+  width: 26px;
+  height: 32px;
+  font-size: 17px;
   color: var(--cyan);
   border: 1px solid rgba(0, 240, 255, .7);
   background: rgba(0, 240, 255, .07);
   text-shadow: 0 0 10px rgba(0, 240, 255, .7);
+}
+
+/* кнопка копирования в строке кода: компактная, в одну строку */
+.duel-code-row .btn-small {
+  min-height: 32px;
+  padding: 4px 10px;
+  font-size: 11px;
+  letter-spacing: .5px;
 }
 
 /* номер сборки — строка в меню, под субтитлом */
@@ -2524,5 +2544,219 @@ body.in-telegram .tg-only {
   letter-spacing: 2px;
   color: rgba(255, 43, 214, .8);
   text-shadow: 0 0 8px rgba(255, 43, 214, .4);
+}
+
+/* ============================================================
+   SPEC §28: дом-экран лобби — вертикальный ритм
+   ============================================================ */
+
+#duel-home {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* панель лобби: вертикальный ритм между дом-экраном / статусами / «Назад» */
+#screen-duel .panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#duel-home .screen-title {
+  margin-bottom: 2px;
+}
+
+/* ============================================================
+   SPEC §28: ПВП-хаб («МОИ БОИ») — рейтинг, задания, топ, статусы
+   ============================================================ */
+
+/* карточка моего рейтинга: бейдж лучшего статуса + ★рейтинг + W:L */
+.pvp-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  background: rgba(255, 230, 0, .04);
+  border: 1px solid rgba(255, 230, 0, .45);
+  box-shadow:
+    0 0 14px rgba(255, 230, 0, .1),
+    inset 0 0 12px rgba(255, 230, 0, .04);
+}
+
+.pvp-rating-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0;
+  flex-wrap: wrap;
+}
+
+.pvp-badge {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--dim);
+  border: 1px dashed rgba(125, 227, 255, .35);
+}
+
+.pvp-badge-on {
+  color: var(--yellow);
+  border-style: solid;
+  border-color: rgba(255, 230, 0, .7);
+  text-shadow: 0 0 8px rgba(255, 230, 0, .45);
+  box-shadow: 0 0 12px rgba(255, 230, 0, .18);
+}
+
+.pvp-rating {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--yellow);
+  text-shadow: 0 0 12px rgba(255, 230, 0, .45);
+}
+
+.pvp-record {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--cyan);
+}
+
+/* задания: дейлик + недельный */
+.quests-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 16px;
+}
+
+.quest-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  background: rgba(4, 5, 12, .55);
+  border: 1px solid rgba(0, 240, 255, .25);
+}
+
+.quest-label {
+  font-size: 12px;
+  color: var(--cyan);
+  text-align: left;
+}
+
+.quest-prog {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--dim);
+}
+
+.quest-done {
+  border-color: rgba(0, 255, 157, .5);
+  background: rgba(0, 255, 157, .05);
+}
+
+.quest-done .quest-label {
+  color: #eafcff;
+}
+
+.quest-done .quest-prog {
+  color: var(--green);
+  text-shadow: 0 0 8px rgba(0, 255, 157, .4);
+}
+
+/* глобальный топ ПВП */
+.pvp-top {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 16px;
+}
+
+.pvp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  background: rgba(4, 5, 12, .6);
+  border: 1px solid rgba(0, 240, 255, .2);
+}
+
+.pvp-row-me {
+  border-color: rgba(255, 230, 0, .6);
+  box-shadow: 0 0 12px rgba(255, 230, 0, .12);
+}
+
+.pvp-pos {
+  flex: none;
+  width: 26px;
+  color: var(--dim);
+}
+
+.pvp-row-me .pvp-pos {
+  color: var(--yellow);
+}
+
+.pvp-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #eafcff;
+  text-align: left;
+}
+
+.pvp-rate {
+  flex: none;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--yellow);
+  text-shadow: 0 0 8px rgba(255, 230, 0, .4);
+}
+
+.pvp-wl {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--magenta);
+}
+
+/* 20 ПВП-статусов: полученные светятся, остальные — пунктир-заглушки */
+.pvp-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 0 18px;
+}
+
+.pvp-chip {
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: rgba(125, 227, 255, .4);
+  border: 1px dashed rgba(125, 227, 255, .25);
+}
+
+.pvp-chip-on {
+  color: var(--yellow);
+  border-style: solid;
+  border-color: rgba(255, 230, 0, .6);
+  text-shadow: 0 0 8px rgba(255, 230, 0, .4);
+  box-shadow: 0 0 10px rgba(255, 230, 0, .12);
 }
 

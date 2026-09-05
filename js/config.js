@@ -18,6 +18,6 @@
   CS.Config = {
     apiBase: 'https://144-31-61-4.sslip.io',
     wsUrl: 'wss://144-31-61-4.sslip.io/ws',
-    build: 'v12'   // номер сборки: синхронно с VERSION в sw.js (чек-лист)
+    build: 'v13'   // номер сборки: синхронно с VERSION в sw.js (чек-лист)
   };
 })();

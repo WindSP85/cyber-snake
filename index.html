@@ -64,13 +64,15 @@
           <!-- feature T24: online duel entry (SPEC §22) — above "Играть" -->
           <button id="btn-duel" class="btn btn-primary" type="button" data-i18n="duel">Онлайн-бой</button>
           <button id="btn-start" class="btn btn-primary" type="button" data-i18n="play">Играть</button>
-          <!-- feature T20: the daily challenge run (its own modifier) -->
-          <button id="btn-daily" class="btn" type="button" data-i18n="daily">Челлендж дня</button>
-          <button id="btn-controls" class="btn" type="button" data-i18n="controls">Управление</button>
-          <button id="btn-board" class="btn" type="button" data-i18n="board">Лидеры</button>
-          <button id="btn-ach" class="btn" type="button" data-i18n="ach">Достижения</button>
-          <button id="btn-skins" class="btn" type="button" data-i18n="skins">Скины</button>
-          <button id="btn-upg" class="btn" type="button" data-i18n="upg">Апгрейды</button>
+          <!-- вторичные пункты: сетка одинаковых кнопок 2 в ряд -->
+          <div class="menu-grid">
+            <button id="btn-daily" class="btn" type="button" data-i18n="daily">Челлендж дня</button>
+            <button id="btn-board" class="btn" type="button" data-i18n="board">Лидеры</button>
+            <button id="btn-ach" class="btn" type="button" data-i18n="ach">Достижения</button>
+            <button id="btn-skins" class="btn" type="button" data-i18n="skins">Скины</button>
+            <button id="btn-upg" class="btn" type="button" data-i18n="upg">Апгрейды</button>
+            <button id="btn-controls" class="btn" type="button" data-i18n="controls">Управление</button>
+          </div>
           <button id="btn-lang" class="btn" type="button" title="Language">🌐</button>
         </div>
         <!-- feature T21: separate music / sfx volume (cs_mvol / cs_svol) -->
@@ -258,20 +260,19 @@
             <button id="btn-lobby-accept" class="btn btn-primary lobby-accept hidden" type="button"></button>
           </div>
 
-          <!-- второстепенное: код + история -->
-          <div class="duel-secondary">
-            <div id="duel-join-block" class="duel-join-inline">
-              <input id="duel-code-input" class="duel-code-input" type="text" maxlength="4" autocomplete="off" autocapitalize="off" spellcheck="false">
-              <button id="btn-duel-go" class="btn" type="button" data-i18n="duelGo">В БОЙ</button>
-            </div>
-            <button id="btn-battles" class="btn btn-small duel-battles-btn" type="button" data-i18n="battles">МОИ БОИ</button>
+          <!-- второстепенное: вход по коду (поле+кнопка одной высоты) -->
+          <div id="duel-join-block" class="duel-join-inline">
+            <input id="duel-code-input" class="duel-code-input" type="text" maxlength="4" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <button id="btn-duel-go" class="btn" type="button" data-i18n="duelGo">В БОЙ</button>
           </div>
+          <button id="btn-battles" class="btn duel-battles-btn" type="button" data-i18n="battles">МОИ БОИ</button>
         </div>
 
         <!-- ═══ VS-КОМНАТА: в комнате, до старта ═══ -->
         <div id="duel-room-live" class="vs-room hidden">
           <h2 class="screen-title" data-i18n="duelRoomTitle">КОМНАТА БОЯ</h2>
 
+          <!-- состав: я · VS · соперник ИЛИ слот «ждём…» на его месте -->
           <div class="vs-grid">
             <div class="pcard pcard-me">
               <div class="pcard-ava" id="me-ava">ВЫ</div>
@@ -279,23 +280,22 @@
               <div id="me-ready" class="ready-badge"></div>
             </div>
             <div class="vs-mid">VS</div>
+            <div id="foe-slot" class="pcard pcard-slot">
+              <div class="pcard-ava pcard-ava-slot">?</div>
+              <div class="pcard-name duel-wait-text" data-i18n="duelWait">ждём соперника…</div>
+            </div>
             <div id="foe-player" class="pcard pcard-foe hidden">
               <div class="pcard-ava pcard-ava-foe" id="foe-ava">?</div>
               <div id="foe-player-name" class="pcard-name"></div>
               <div id="foe-ready" class="ready-badge"></div>
             </div>
           </div>
-          <div id="foe-slot" class="pcard pcard-slot">
-            <div class="pcard-ava pcard-ava-slot">?</div>
-            <div class="pcard-name duel-wait-text" data-i18n="duelWait">ждём соперника…</div>
-          </div>
 
           <p id="duel-ready-hint" class="duel-ready-hint hidden"></p>
 
-          <!-- код комнаты (хост): компактная строка с приглашением -->
+          <!-- код комнаты (хост): пластины + копирование одной строкой -->
           <div id="duel-room" class="duel-room hidden">
             <div class="duel-code-row">
-              <span class="duel-label" data-i18n="duelCode">КОД</span>
               <div id="duel-code" class="duel-code-inline"></div>
               <button id="btn-duel-copy" class="btn btn-small" type="button" data-i18n="duelCopy">КОПИРОВАТЬ</button>
             </div>
@@ -303,13 +303,14 @@
               <button id="btn-duel-invite" class="btn btn-primary" type="button" data-i18n="duelInviteBtn">ПОЗВАТЬ В БОЙ</button>
             </div>
             <span id="duel-copied" class="duel-copied hidden" data-i18n="duelCopied">СКОПИРОВАНО</span>
-            <p id="duel-link" class="duel-link"></p>
+            <!-- ссылка показывается только как fallback ручного копирования -->
+            <p id="duel-link" class="duel-link hidden"></p>
             <input id="duel-link-copy" class="duel-link-copy hidden" type="text" readonly>
           </div>
 
           <!-- единая главная кнопка: ГОТОВ ↔ НЕ ГОТОВ -->
           <button id="btn-duel-ready" class="btn btn-xl" type="button" data-i18n="duelReady">ГОТОВ К БОЮ</button>
-          <button id="btn-duel-leave" class="btn btn-small btn-ghost" type="button" data-i18n="duelLeave">ПОКИНУТЬ КОМНАТУ</button>
+          <button id="btn-duel-leave" class="btn btn-ghost" type="button" data-i18n="duelLeave">ПОКИНУТЬ КОМНАТУ</button>
         </div>
 
         <!-- waiting status: роль · ждём… -->
@@ -326,7 +327,7 @@
         <!-- inline network error (duelErr*) -->
         <p id="duel-error" class="duel-error hidden"></p>
 
-        <button id="btn-duel-back" class="btn btn-small btn-ghost" type="button" data-i18n="back">Назад</button>
+        <button id="btn-duel-back" class="btn btn-ghost" type="button" data-i18n="back">Назад</button>
       </div>
     </div>
 

@@ -195,12 +195,16 @@
   function setWait(on) {
     show('duel-wait', on);
     if (on) {
-      setText('duel-wait-text', t('duelWait'));
+      // «ждём соперника…» уже говорит слот соперника в VS-сетке —
+      // здесь только роль и цвета змеек
       setText('duel-role', mode === 'host' ? t('duelHost') : t('duelGuest'));
       show('duel-role', true);
       // T27b: whose snake is whose — right in the lobby, before the fight
       setText('duel-youare', t(mode === 'host' ? 'duelYouAreHost' : 'duelYouAre'));
       show('duel-youare', true);
+      show('duel-wait-text', false);
+      const dots = document.querySelector('.duel-dots');
+      if (dots && dots.classList) dots.classList.add('hidden');
     }
   }
 
@@ -272,6 +276,7 @@
     show('duel-room', false);
     show('duel-room-live', false);
     show('duel-home', true); // дом-экран лобби: карточки + создать + код
+    show('btn-duel-back', true); // выход из лобби — снова на месте
     show('duel-link-copy', false);
     show('duel-copied', false);
     show('duel-streak', false); // feature T25: openLobby re-renders it
@@ -545,6 +550,7 @@
       if (goBtn) goBtn.disabled = true;
     }
     show('duel-home', false);
+    show('btn-duel-back', false); // в комнате один выход — «ПОКИНУТЬ КОМНАТУ»
     const mine = CS.Net && typeof CS.Net.myName === 'function' ? CS.Net.myName() : '';
     setText('me-ava', initials(mine || t('duelYou')));
     renderReadyUi(); // VS-панель + «ГОТОВ К БОЮ» (SPEC §28)
