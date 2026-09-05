@@ -639,6 +639,12 @@
     updateMuteLabel();
     wireVolumeSliders(); // feature T21: menu music/sfx sliders
     CS.UI.hud({ best: loadBest() });
+    // номер сборки в углу — единственный честный признак версии
+    const badge = document.getElementById('ver-badge');
+    if (badge) {
+      const b = window.CS && CS.Config && CS.Config.build;
+      badge.textContent = b ? 'СБОРКА ' + b : '';
+    }
   }
 
   CS.UI = {
