@@ -37,6 +37,9 @@ const log = function () {
 };
 
 const store = new Store(DATA_DIR);
+store.onError = function (e) {
+  log('ХРАНИЛИЩЕ: запись на диск падает (' + e.message + ') — данные живут только в памяти!');
+};
 
 /* ---------- HTTP API ---------- */
 
@@ -159,7 +162,28 @@ function handleApi(req, res, urlObj) {
         return;
       }
       store.addDuel(v);
+      /* ПВП-рейтинг: раскладываем счёт и способы побед;
+         старые клиенты шлют только rounds 'W:L' — совместимо */
+      const m = /^(\d)[:,.](\d)$/.exec(v.rounds);
+      store.addPvpResult({
+        winner: v.winner,
+        loser: v.loser,
+        wRounds: m ? Number(m[1]) : 0,
+        lRounds: m ? Number(m[2]) : 0,
+        causes: Array.isArray(body && body.causes) ? body.causes : []
+      });
       sendJson(res, 201, { ok: true });
+    });
+    return;
+  }
+
+  /* ПВП: топ рейтинга + своя карточка (?name=, ?limit=) */
+  if (route === '/api/pvp' && req.method === 'GET') {
+    const name = (urlObj.searchParams.get('name') || '').trim().slice(0, 20);
+    const limit = urlObj.searchParams.get('limit') || 10;
+    sendJson(res, 200, {
+      top: store.pvpTop(limit),
+      me: name ? store.pvpPublic(name) : null
     });
     return;
   }
@@ -167,14 +191,17 @@ function handleApi(req, res, urlObj) {
   sendJson(res, 404, { error: 'not found' });
 }
 
-/* ---------- WebSocket: комнаты дуэлей ---------- */
+/* ---------- WebSocket: комнаты дуэлей + лобби ожидания ---------- */
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
 
-const rooms = new Map();     // code → Map(id → {ws, name})
+const rooms = new Map();     // code → Map(id → {ws, name}); на самой Map:
+                             // .createdOpen — комната создана «открытой»
+                             // (видна в лобби, пока ждёт соперника)
 const MAX_ROOM_MEMBERS = 2;  // 1×1: третий лишний
 const MAX_SOCKETS = 300;     // защита от исчерпания памяти
 const PING_EVERY = 15000;    // протокольный ping всем сокетам
+const LOBBY_MAX = 20;        // максимум строк в списке лобби
 let sockets = 0;
 
 function sendObj(ws, obj) {
@@ -183,6 +210,28 @@ function sendObj(ws, obj) {
   } catch (e) {
     /* сокет умер — presence почистит по close-событию */
   }
+}
+
+/* список открытых комнат ожидания: [{code, name}] — комната с одним
+   игроком, созданная с флагом open */
+function lobbyList() {
+  const list = [];
+  rooms.forEach(function (room, code) {
+    if (list.length >= LOBBY_MAX) return;
+    if (!room.createdOpen || room.size !== 1) return;
+    let name = 'PLAYER';
+    room.forEach(function (m) { name = m.name; });
+    list.push({ code: code, name: String(name).slice(0, 20) });
+  });
+  return list;
+}
+
+/* разослать свежий список всем наблюдателям лобби */
+function pushLobby() {
+  const payload = { t: 'lobby', list: lobbyList() };
+  wss.clients.forEach(function (ws) {
+    if (ws._lobby) sendObj(ws, payload);
+  });
 }
 
 function roomSnapshot(code) {
@@ -212,26 +261,42 @@ function leaveRoom(ws) {
   if (!room) return;
   const member = room.get(ws._id);
   if (member && member.ws === ws) room.delete(ws._id);
-  if (room.size === 0) rooms.delete(code);
-  else broadcastPresence(code);
+  if (room.size === 0) {
+    rooms.delete(code);
+    pushLobby(); // комната исчезла из списка ожидания
+  } else {
+    broadcastPresence(code);
+    pushLobby(); // снова один игрок — комната снова ждёт
+  }
 }
 
 function handleJson(ws, msg) {
   if (!msg || typeof msg !== 'object') return;
 
+  /* подписка на лобби ожидания: сокет без комнаты получает список
+     открытых комнат при входе и после каждого изменения */
+  if (msg.t === 'lobby') {
+    ws._lobby = true;
+    sendObj(ws, { t: 'lobby', list: lobbyList() });
+    return;
+  }
+
   if (msg.t === 'join') {
     const code = String(msg.room || '').toUpperCase();
     const id = String(msg.id || '');
     const name = String(msg.name || 'PLAYER').trim().slice(0, 20) || 'PLAYER';
+    const open = !!msg.open;
     if (!/^[A-Z0-9]{4}$/.test(code) || !/^[a-zA-Z0-9]{4,16}$/.test(id)) {
       sendObj(ws, { t: 'joined', ok: false, error: 'bad' });
       return;
     }
     leaveRoom(ws); // повторный join просто меняет комнату
+    ws._lobby = false; // игрок в комнате — пуш лобби ему больше не нужен
 
     let room = rooms.get(code);
     if (!room) {
       room = new Map();
+      room.createdOpen = open; // «открытая» комната попадает в лобби
       rooms.set(code, room);
     }
     if (room.size >= MAX_ROOM_MEMBERS && !room.has(id)) {
@@ -248,6 +313,7 @@ function handleJson(ws, msg) {
     room.set(id, { ws: ws, id: id, name: name });
     sendObj(ws, { t: 'joined', ok: true });
     broadcastPresence(code);
+    pushLobby(); // комната набрала двоих → исчезла из ожидания
     return;
   }
 
@@ -279,6 +345,7 @@ wss.on('connection', function (ws, req) {
   }
   ws._room = '';
   ws._id = '';
+  ws._lobby = false;
   ws.isAlive = true;
   ws._count = 0; // простая защита от флуда: окно 60 с ниже
 

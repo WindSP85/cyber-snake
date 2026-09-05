@@ -8,8 +8,9 @@ WORKDIR /app
 COPY server/server.js server/store.js server/bot.js ./
 COPY server/ws ./ws
 
-# данные (scores.json / duels.json) живут в volume
-RUN mkdir -p /app/data
+# данные (scores/duels/pvp json) живут в volume; владелец — node,
+# иначе docker создаст том под root и запись молча упадёт
+RUN mkdir -p /app/data && chown -R node:node /app/data
 ENV DATA_DIR=/app/data
 ENV PORT=8080
 

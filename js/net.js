@@ -47,6 +47,13 @@
   const msgCbs = [];        // onMessage listeners
   const presenceCbs = [];   // onPresence listeners
 
+  /* лобби ожидания: отдельный лёгкий сокет-наблюдатель */
+  let lobbySocket = null;
+  let lobbyGen = 0;         // каждое watchLobby() отменяет предыдущее
+  let lobbyRetry = 0;       // пауза переподключения, мс
+  let lobbyRetryTimer = 0;
+  let lobbyCb = null;       // cb(list | null)
+
   /* ---------- helpers ---------- */
 
   function trimmed(value) {
@@ -221,9 +228,12 @@
   }
 
   /* cb({ok, error?}) with error ∈ 'no_client' | 'timeout' | 'full';
-     opens the WebSocket, sends 'join' and waits for the verdict */
-  function join(code, cb) {
+     opens the WebSocket, sends 'join' and waits for the verdict.
+     opts.open = true → «открытая» комната ожидания: её видно в лобби,
+     соперник может войти одним тапом без кода (SPEC §28) */
+  function join(code, cb, opts) {
     const done = typeof cb === 'function' ? cb : function () {};
+    const open = !!(opts && opts.open);
     try {
       const norm = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       if (!norm || !isConfigured()) {
@@ -259,7 +269,7 @@
 
       ws.onopen = function () {
         if (gen !== generation) return;
-        sendRaw({ t: 'join', room: roomCode, id: myId, name: myName });
+        sendRaw({ t: 'join', room: roomCode, id: myId, name: myName, open: open });
       };
       ws.onerror = function () {
         if (gen !== generation) return;
@@ -361,6 +371,95 @@
     return sendRaw({ t: 'ping' });
   }
 
+  /* ---------- лобби ожидания (SPEC §28: открытые комнаты) ---------- */
+
+  function lobbyCleanup() {
+    if (lobbyRetryTimer) {
+      window.clearTimeout(lobbyRetryTimer);
+      lobbyRetryTimer = 0;
+    }
+    const ws = lobbySocket;
+    lobbySocket = null;
+    if (ws) {
+      try { ws.onclose = null; } catch (e) { /* уже gone */ }
+      try { ws.onerror = null; } catch (e) { /* уже gone */ }
+      try { ws.onmessage = null; } catch (e) { /* уже gone */ }
+      try {
+        if (ws.readyState === 0 || ws.readyState === 1) ws.close();
+      } catch (e) {
+        /* уже gone */
+      }
+    }
+  }
+
+  /* cb(list | null): свежий список открытых комнат [{code, name}];
+     null — сервер недоступен (список просто не показываем). Наблюдатель
+     живёт своим сокетом и сам переподключается, пока активен */
+  function watchLobby(cb) {
+    lobbyCb = typeof cb === 'function' ? cb : null;
+    const gen = ++lobbyGen;
+    lobbyRetry = 0;
+    lobbyCleanup();
+    if (!isConfigured()) {
+      if (lobbyCb) lobbyCb(null);
+      return;
+    }
+
+    const connect = function () {
+      if (gen !== lobbyGen) return; // уже отменили
+      let ws = null;
+      try {
+        ws = new window.WebSocket(trimmed(CS.Config.wsUrl));
+      } catch (e) {
+        scheduleRetry();
+        return;
+      }
+      lobbySocket = ws;
+      ws.onopen = function () {
+        if (gen !== lobbyGen) return;
+        lobbyRetry = 0; // соединение удалось — пауза сброшена
+        try { ws.send(JSON.stringify({ t: 'lobby' })); } catch (e) { /* повторим */ }
+      };
+      ws.onmessage = function (evt) {
+        if (gen !== lobbyGen) return;
+        let msg = null;
+        try {
+          msg = JSON.parse(String(evt && evt.data));
+        } catch (e) {
+          return;
+        }
+        if (msg && msg.t === 'lobby' && lobbyCb) {
+          lobbyCb(Array.isArray(msg.list) ? msg.list : []);
+        }
+      };
+      ws.onclose = function () {
+        if (gen !== lobbyGen) return;
+        scheduleRetry();
+      };
+      ws.onerror = function () {
+        if (gen !== lobbyGen) return;
+        try { ws.close(); } catch (e) { /* onclose договорит */ }
+      };
+    };
+
+    const scheduleRetry = function () {
+      if (gen !== lobbyGen) return;
+      lobbyRetry = lobbyRetry ? Math.min(lobbyRetry * 2, 15000) : 2000;
+      lobbyRetryTimer = window.setTimeout(function () {
+        if (gen === lobbyGen) connect();
+      }, lobbyRetry);
+    };
+
+    connect();
+  }
+
+  /* перестать следить за лобби (сокет закрывается, колбэк глохнет) */
+  function stopLobby() {
+    lobbyGen++;
+    lobbyCb = null;
+    lobbyCleanup();
+  }
+
   /* teardown + reset; listeners stay registered, join() works again.
      A game-level farewell ('bye') is the CALLER's business (duelui
      already sends it before calling this) */
@@ -383,6 +482,8 @@
     onMessage: onMessage,
     onPresence: onPresence,
     heartbeat: heartbeat,
+    watchLobby: watchLobby,
+    stopLobby: stopLobby,
     leave: leave,
     state: state,
     myName: function () { return myName; }

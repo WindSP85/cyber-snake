@@ -65,6 +65,10 @@
   let copiedTimer = 0;
   let lastR = 'aborted';    // feature T25: the latest finished match result
   let lastScore = '0:0';    // feature T25: its score, my view («2:1»)
+  let myCauses = [];        // ПВП: способы МОИХ побед в раундах матча
+  let foeCauses = [];       // ПВП: способы побед соперника
+  let seenStatuses = null;  // ПВП: какие статусы уже видели (тост «новый»)
+  let pvpTimer = 0;         // ПВП: таймаут загрузки рейтинга
 
   /* ---------- dom / i18n helpers ---------- */
 
@@ -266,6 +270,7 @@
     show('duel-room', false);
     show('duel-create-block', true);
     show('duel-join-block', true);
+    show('duel-lobby-block', true); // SPEC §28: список ждущих виден в лобби
     show('duel-link-copy', false);
     show('duel-copied', false);
     show('duel-streak', false); // feature T25: openLobby re-renders it
@@ -278,6 +283,8 @@
     const goBtn = byId('btn-duel-go');
     if (goBtn) goBtn.disabled = false;
     resetRematchButton();
+    renderLobbyList([]); // ждущих покажет наблюдатель, пока — пусто
+    startLobbyWatch();
   }
 
   /* full reset: also say bye, drop the channel (repeat joins stay
@@ -285,6 +292,7 @@
   function reset() {
     flow++;
     netSend('bye');
+    stopLobbyWatch();
     try {
       if (CS.Net && typeof CS.Net.leave === 'function') CS.Net.leave();
     } catch (e) {
@@ -299,9 +307,87 @@
     if (CS.UI && typeof CS.UI.show === 'function') CS.UI.show('duel');
   }
 
-  /* feature T25: «МОИ БОИ» — the battles screen over the lobby */
+  /* ---------- SPEC §28: лобби ожидания (открытые комнаты) ---------- */
+
+  /* список ждущих: приходит с сервера при каждом изменении */
+  function startLobbyWatch() {
+    if (!CS.Net || typeof CS.Net.watchLobby !== 'function') return;
+    try {
+      CS.Net.watchLobby(function (list) {
+        if (mode !== 'idle') return; // в комнате список не нужен
+        renderLobbyList(Array.isArray(list) ? list : []);
+      });
+    } catch (e) {
+      /* лобби — необязательная приятность: тихо */
+    }
+  }
+
+  function stopLobbyWatch() {
+    try {
+      if (CS.Net && typeof CS.Net.stopLobby === 'function') CS.Net.stopLobby();
+    } catch (e) {
+      /* уже остановлено */
+    }
+  }
+
+  /* строки «ИМЯ → ВОЙТИ»: один тап — и гость в комнате без кода */
+  function renderLobbyList(list) {
+    const box = byId('duel-lobby-list');
+    const empty = byId('duel-lobby-empty');
+    if (!box) return;
+    box.innerHTML = '';
+    if (empty) empty.classList.toggle('hidden', !!list.length);
+    for (let i = 0; i < list.length && i < 20; i++) {
+      const r = list[i] || {};
+      const code = String(r.code || '').toUpperCase();
+      if (!CODE_RE.test(code)) continue;
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'lobby-row';
+      const nm = document.createElement('span');
+      nm.className = 'lobby-name';
+      nm.textContent = String(r.name || 'PLAYER').slice(0, 20);
+      const join = document.createElement('span');
+      join.className = 'lobby-join';
+      join.textContent = t('lobbyJoin');
+      row.appendChild(nm);
+      row.appendChild(join);
+      row.addEventListener('click', function () {
+        if (busy || mode !== 'idle') return;
+        enterRoom(code, 'guest');
+      });
+      box.appendChild(row);
+    }
+  }
+
+  /* feature T25: «МОИ БОИ» — the battles screen over the lobby;
+     SPEC §28: теперь это ПВП-хаб — рейтинг, топ, статусы, задания */
   function openBattles() {
     if (CS.UI && typeof CS.UI.show === 'function') CS.UI.show('battles');
+    fetchPvpQuiet();
+    renderQuests();
+  }
+
+  /* задания (CS.Quests) на экране боёв: дейлик + недельный */
+  function renderQuests() {
+    const box = byId('quests-box');
+    if (!box || !CS.Quests || typeof CS.Quests.peek !== 'function') return;
+    box.innerHTML = '';
+    const list = CS.Quests.peek();
+    for (let i = 0; i < list.length; i++) {
+      const q = list[i] || {};
+      const row = document.createElement('div');
+      row.className = 'quest-row' + (q.done ? ' quest-done' : '');
+      const label = document.createElement('span');
+      label.className = 'quest-label';
+      label.textContent = t(q.key);
+      const prog = document.createElement('span');
+      prog.className = 'quest-prog';
+      prog.textContent = (q.have | 0) + '/' + (q.need | 0) + (q.done ? ' ✓' : '');
+      row.appendChild(label);
+      row.appendChild(prog);
+      box.appendChild(row);
+    }
   }
 
   /* its «НАЗАД»: back into the lobby exactly as it was — no channel
@@ -350,7 +436,7 @@
           setError(mapErr(res && res.error));
           return;
         }
-        enterRoom(res.code, 'host');
+        enterRoom(res.code, 'host', true); // SPEC §28: комната «открытая»
       });
     });
   }
@@ -369,7 +455,7 @@
   }
 
   /* the shared room entry: lobby visuals first, then the channel */
-  function enterRoom(code, role) {
+  function enterRoom(code, role, open) {
     mode = role;
     roomCode = code;
     started = false;
@@ -377,6 +463,9 @@
     rematchMine = false;
     rematchFoe = false;
     foeGone = false;
+    myCauses = [];
+    foeCauses = [];
+    stopLobbyWatch(); // в комнате список ждущих не нужен
     setError(null);
     if (role === 'host') {
       renderCode(code);
@@ -384,8 +473,10 @@
       show('duel-room', true);
       show('duel-create-block', false);
       show('duel-join-block', false);
+      show('duel-lobby-block', false);
     } else {
       show('duel-create-block', false);
+      show('duel-lobby-block', false);
       const input = byId('duel-code-input');
       if (input) {
         input.value = code;
@@ -405,7 +496,7 @@
       }
       connected = true;
       if (mode === 'guest') netSend('hello', null); // the name is in presence
-    });
+    }, { open: !!open }); // SPEC §28: хост создаёт «открытую» комнату
   }
 
   /* ---------- the match ---------- */
@@ -423,6 +514,8 @@
     rematchMine = false;
     rematchFoe = false;
     foeGone = false;
+    myCauses = [];
+    foeCauses = [];
     setError(null);
     setWait(false);
     show('duel-room', false);
@@ -469,9 +562,25 @@
     recordDuel(r, mine); // feature T25: the local history ('aborted' skipped)
     renderStreakBadge(); // the lobby badge is ready for the next visit
     reportDuelResult(r, sc); // SPEC §22: match history in the cloud
+    /* ПВП-задания (SPEC §28): дейлик + недельный по итогам матча */
+    if (r === 'win' || r === 'loss') {
+      const myIdx2 = mode === 'host' ? 0 : 1;
+      const myWins = sc[myIdx2] | 0;
+      const foeWins = sc[1 - myIdx2] | 0;
+      if (CS.Quests && typeof CS.Quests.event === 'function') {
+        CS.Quests.event({
+          win: r === 'win',
+          clean: r === 'win' && foeWins === 0,
+          causes: (r === 'win' ? myCauses : foeCauses).slice(),
+          foe: foeName || '',
+          roundsWon: myWins
+        });
+      }
+    }
   }
 
-  /* fire-and-forget duel result POST (only real win/loss matches) */
+  /* fire-and-forget duel result POST (only real win/loss matches);
+     ПВП-рейтингу нужны счёт по раундам и способы побед */
   function reportDuelResult(r, sc) {
     try {
       if (r !== 'win' && r !== 'loss') return;
@@ -479,10 +588,15 @@
       if (!cfg || !cfg.apiBase) return;
       const mine = (CS.Net && typeof CS.Net.myName === 'function' ? CS.Net.myName() : '') || 'PLAYER';
       const foe = foeName || 'RIVAL';
+      const wRounds = r === 'win' ? (sc[0] | 0) : (sc[1] | 0);
+      const lRounds = r === 'win' ? (sc[1] | 0) : (sc[0] | 0);
       const body = {
         winner: r === 'win' ? mine : foe,
         loser: r === 'win' ? foe : mine,
-        rounds: (sc[0] | 0) + ':' + (sc[1] | 0)
+        rounds: wRounds + ':' + lRounds,
+        wRounds: wRounds,
+        lRounds: lRounds,
+        causes: r === 'win' ? myCauses.slice() : foeCauses.slice()
       };
       const ctl = new AbortController();
       const kill = setTimeout(function () { ctl.abort(); }, 5000);
@@ -492,8 +606,189 @@
         body: JSON.stringify(body),
         signal: ctl.signal
       }).catch(function () {}).then(function () { clearTimeout(kill); });
+      /* после отправки подтянем свежий рейтинг/статусы фоном */
+      window.setTimeout(fetchPvpQuiet, 2500);
     } catch (e) {
       /* the duel result screen must never depend on the network */
+    }
+  }
+
+  /* ---------- ПВП: рейтинг, статусы, задания (SPEC §28) ---------- */
+
+  const PVP_CACHE = 'cs_pvp_cache';
+
+  function pvpCacheLoad() {
+    try {
+      const raw = JSON.parse(window.localStorage.getItem(PVP_CACHE) || 'null');
+      if (raw && typeof raw === 'object') return raw;
+    } catch (e) {
+      /* битый кэш — пусто */
+    }
+    return null;
+  }
+
+  function pvpCacheSave(data) {
+    try {
+      window.localStorage.setItem(PVP_CACHE, JSON.stringify(data));
+    } catch (e) {
+      /* хранилище недоступно */
+    }
+  }
+
+  /* список статусов для скинов/тостов (из кэша последнего /api/pvp) */
+  function myStatuses() {
+    const c = pvpCacheLoad();
+    return c && Array.isArray(c.statuses) ? c.statuses : [];
+  }
+
+  function fetchPvpQuiet() {
+    const name = CS.Net && typeof CS.Net.myName === 'function' ? CS.Net.myName() : '';
+    fetchPvp(name, function () {});
+  }
+
+  /* GET /api/pvp?name=: кэш + экран боёв + тост о новом статусе */
+  function fetchPvp(name, cb) {
+    const done = typeof cb === 'function' ? cb : function () {};
+    const cfg = window.CS && CS.Config;
+    if (!cfg || !cfg.apiBase || !name) {
+      renderPvp(null);
+      done(null);
+      return;
+    }
+    const url = cfg.apiBase.replace(/\/$/, '') + '/api/pvp?limit=10&name=' +
+      encodeURIComponent(name);
+    try {
+      const ctl = new AbortController();
+      if (pvpTimer) window.clearTimeout(pvpTimer);
+      pvpTimer = window.setTimeout(function () { ctl.abort(); }, 6000);
+      fetch(url, { signal: ctl.signal }).then(function (res) {
+        if (!res || !res.ok) throw new Error('bad');
+        return res.json();
+      }).then(function (data) {
+        window.clearTimeout(pvpTimer);
+        if (data && data.me) {
+          announceNewStatuses(data.me.statuses || []);
+          pvpCacheSave({
+            name: name, rating: data.me.rating, wins: data.me.wins,
+            losses: data.me.losses, statuses: data.me.statuses || [],
+            ts: Date.now()
+          });
+        }
+        renderPvp(data);
+        done(data);
+      }).catch(function () {
+        window.clearTimeout(pvpTimer);
+        renderPvp(pvpCacheLoad() ? cachedShape() : null);
+        done(null);
+      });
+    } catch (e) {
+      renderPvp(null);
+      done(null);
+    }
+  }
+
+  /* превратить кэш обратно в форму ответа сервера */
+  function cachedShape() {
+    const c = pvpCacheLoad();
+    if (!c) return null;
+    return { top: null, me: c };
+  }
+
+  /* тост на каждый статус, полученный впервые */
+  function announceNewStatuses(ids) {
+    try {
+      if (!Array.isArray(ids) || !ids.length) return;
+      if (seenStatuses === null) {
+        const raw = JSON.parse(window.localStorage.getItem('cs_pvp_seen') || 'null');
+        seenStatuses = Array.isArray(raw) ? raw : [];
+      }
+      let fresh = false;
+      for (let i = 0; i < ids.length; i++) {
+        if (seenStatuses.indexOf(ids[i]) === -1) {
+          seenStatuses.push(ids[i]);
+          fresh = true;
+          if (CS.UI && typeof CS.UI.toast === 'function') {
+            CS.UI.toast(t('pvpStatusNew', t('pvpS' + ids[i])));
+          }
+        }
+      }
+      if (fresh) {
+        try { window.localStorage.setItem('cs_pvp_seen', JSON.stringify(seenStatuses)); } catch (e) { /* нет */ }
+        if (CS.Audio && typeof CS.Audio.sfx === 'function') CS.Audio.sfx('achieve');
+        if (CS.TG && typeof CS.TG.haptic === 'function') CS.TG.haptic('success');
+      }
+    } catch (e) {
+      /* тост статуса не должен ломать экран */
+    }
+  }
+
+  /* экран «МОИ БОИ»: карточка рейтинга + топ + сетка статусов */
+  function renderPvp(data) {
+    const card = byId('pvp-card');
+    const top = byId('pvp-top');
+    const grid = byId('pvp-statuses');
+    if (!card && !top && !grid) return;
+    const me = data && data.me ? data.me : null;
+
+    if (card) {
+      if (me && me.matches > 0) {
+        setText('pvp-rating', t('pvpRating', me.rating));
+        setText('pvp-record', t('pvpRecord', me.wins, me.losses));
+        const badge = byId('pvp-status-badge');
+        if (badge) {
+          const ids = me.statuses || [];
+          const best = ids.length ? ids[ids.length - 1] : 0;
+          badge.textContent = best ? t('pvpS' + best) : t('pvpNoStatus');
+          badge.className = 'pvp-badge' + (best ? ' pvp-badge-on' : '');
+        }
+        card.classList.remove('hidden');
+      } else {
+        card.classList.add('hidden');
+      }
+    }
+
+    if (top) {
+      top.innerHTML = '';
+      const rows = data && Array.isArray(data.top) ? data.top : [];
+      if (!rows.length) {
+        const p = document.createElement('p');
+        p.className = 'battles-empty';
+        p.textContent = t('pvpNoData');
+        top.appendChild(p);
+      } else {
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i] || {};
+          const row = document.createElement('div');
+          row.className = 'pvp-row' + (me && r.name === me.name ? ' pvp-row-me' : '');
+          const pos = document.createElement('span');
+          pos.className = 'pvp-pos';
+          pos.textContent = (i + 1) + '.';
+          const nm = document.createElement('span');
+          nm.className = 'pvp-name';
+          nm.textContent = String(r.name || '?').slice(0, 20);
+          const rt = document.createElement('span');
+          rt.className = 'pvp-rate';
+          rt.textContent = String(r.rating | 0);
+          const wl = document.createElement('span');
+          wl.className = 'pvp-wl';
+          wl.textContent = (r.wins | 0) + ':' + (r.losses | 0);
+          row.appendChild(pos); row.appendChild(nm); row.appendChild(rt); row.appendChild(wl);
+          top.appendChild(row);
+        }
+      }
+    }
+
+    if (grid) {
+      grid.innerHTML = '';
+      const mine = me ? (me.statuses || []) : [];
+      for (let id = 1; id <= 20; id++) {
+        const chip = document.createElement('span');
+        const on = mine.indexOf(id) !== -1;
+        chip.className = 'pvp-chip' + (on ? ' pvp-chip-on' : '');
+        chip.textContent = t('pvpS' + id);
+        chip.title = t('pvpReq' + id);
+        grid.appendChild(chip);
+      }
     }
   }
 
@@ -538,16 +833,40 @@
       }
       return;
     }
-    /* host: the rival arrived (presence >= 2) -> auto-start */
+    /* host: the rival arrived (presence >= 2) -> громкое «можно
+       запускать» + авто-старт (SPEC §28) */
     if (!inMatch() && !ended && mode === 'host' && connected && others >= 1) {
+      if (CS.UI && typeof CS.UI.toast === 'function') {
+        CS.UI.toast(t('lobbyRivalFound'));
+      }
+      if (CS.TG && typeof CS.TG.haptic === 'function') CS.TG.haptic('success');
+      if (CS.Audio && typeof CS.Audio.sfx === 'function') CS.Audio.sfx('levelup');
       startMatch();
     }
   }
 
-  function handleNetMessage(type) {
+  function handleNetMessage(type, data) {
     if (mode === 'idle') return;
     if (type === 'start') {
       if (mode === 'guest' && connected && !inMatch()) beginMatch();
+      return;
+    }
+    if (type === 'round') {
+      /* ПВП: способ победы в раунде (duel.js endRound → k) */
+      const w = data && typeof data.w === 'number' ? data.w : -1;
+      const k = data ? String(data.k || '') : '';
+      const mine = w === (mode === 'host' ? 0 : 1);
+      if (w >= 0 && mine) {
+        if (k === 'dEat') myCauses.push('bite');
+        else if (k === 'dTrapped') myCauses.push('loop');
+        else if (k === 'dHead') myCauses.push('headon');
+        else if (k === 'dCrash') myCauses.push('crash');
+      } else if (w >= 0) {
+        if (k === 'dEat') foeCauses.push('bite');
+        else if (k === 'dTrapped') foeCauses.push('loop');
+        else if (k === 'dHead') foeCauses.push('headon');
+        else if (k === 'dCrash') foeCauses.push('crash');
+      }
       return;
     }
     if (type === 'rematch') {
@@ -745,6 +1064,8 @@
        rows for ui.js renderBattles (test.html + headless tests too) */
     stats: duelStats,
     history: loadDuels,
+    /* SPEC §28: мои ПВП-статусы (из кэша /api/pvp) — гейт скинов */
+    pvpStatuses: myStatuses,
     /* live debug/QA view (test.html + headless tests) */
     state: function () {
       return {

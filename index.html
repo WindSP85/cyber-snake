@@ -248,6 +248,14 @@
           <button id="btn-duel-create" class="btn btn-primary" type="button" data-i18n="duelCreate">СОЗДАТЬ БОЙ</button>
         </div>
 
+        <!-- SPEC §28: waiting lobby — anyone without a link sees who
+             waits and joins with ONE tap -->
+        <div id="duel-lobby-block" class="duel-block">
+          <p class="duel-label" data-i18n="lobbyTitle">ЖДУТ ИГРОКИ</p>
+          <div id="duel-lobby-list" class="lobby-list"></div>
+          <p id="duel-lobby-empty" class="lobby-empty" data-i18n="lobbyEmpty">Пока никто не ждёт — создайте бой первым!</p>
+        </div>
+
         <!-- the created room: HUGE one-char code plates + the deep link -->
         <div id="duel-room" class="duel-room hidden">
           <p class="duel-label" data-i18n="duelCode">КОД КОМНАТЫ</p>
@@ -312,9 +320,26 @@
     <div id="screen-battles" class="screen hidden">
       <div class="panel">
         <h2 class="screen-title" data-i18n="battlesTitle">МОИ БОИ</h2>
+        <!-- SPEC §28: my PVP card — rating, W/L, best status badge -->
+        <div id="pvp-card" class="pvp-card hidden">
+          <p class="pvp-rating-line">
+            <span id="pvp-status-badge" class="pvp-badge"></span>
+            <span id="pvp-rating" class="pvp-rating"></span>
+          </p>
+          <p id="pvp-record" class="pvp-record"></p>
+        </div>
         <!-- the stats line + the rows are (re)built by ui.js renderBattles() -->
         <p id="battles-stats" class="battles-stats"></p>
         <div id="battles-list" class="battles-list"></div>
+        <!-- SPEC §28: quests — one daily PVP quest + one weekly -->
+        <p class="duel-label" data-i18n="questsTitle">ЗАДАНИЯ</p>
+        <div id="quests-box" class="quests-box"></div>
+        <!-- SPEC §28: the global PVP rating top -->
+        <p class="duel-label" data-i18n="pvpTopTitle">РЕЙТИНГ ПВП</p>
+        <div id="pvp-top" class="pvp-top"></div>
+        <!-- SPEC §28: 20 PVP-only statuses -->
+        <p class="duel-label" data-i18n="pvpStatusesTitle">СТАТУСЫ ПВП</p>
+        <div id="pvp-statuses" class="pvp-statuses"></div>
         <!-- back to the duel lobby (the duel context), not to the menu -->
         <button id="btn-battles-back" class="btn" type="button" data-i18n="back">Назад</button>
       </div>
@@ -365,6 +390,8 @@
   <script src="js/upgrades.js"></script>
   <!-- feature T20: daily challenge (SPEC §20) — after upgrades, before ui -->
   <script src="js/daily.js"></script>
+  <!-- SPEC §28: ПВП-задания (дейлик + недельный) — after daily, before duelui -->
+  <script src="js/quests.js"></script>
   <script src="js/ui.js"></script>
   <!-- feature T24: the duel lobby ui (SPEC §22) — after ui, before game -->
   <script src="js/duelui.js"></script>

@@ -241,6 +241,72 @@ async function tests() {
   A2.close();
   C.close();
 
+  /* ============ 4. WS-лобби ожидания ============ */
+  console.log('\n[4] WS-лобби (открытые комнаты, SPEC §28)');
+
+  const W = await connect();
+  sendW(W, { t: 'lobby' });
+  m = await waitFor(W, function (x) { return x.t === 'lobby'; }, 'lobby при подписке');
+  eq(m.list, [], 'подписка: пустой список');
+
+  const H1 = await connect();
+  sendW(H1, { t: 'join', room: 'LBB1', id: 'host11111', name: 'HostOne', open: true });
+  m = await waitFor(H1, function (x) { return x.t === 'joined'; }, 'join H1');
+  ok(m.ok === true, 'хост вошёл в открытую комнату');
+  m = await waitFor(W, function (x) { return x.t === 'lobby' && x.list.length === 1; }, 'lobby: комната появилась');
+  eq(m.list[0], { code: 'LBB1', name: 'HostOne' }, 'список: код + имя ждущего');
+
+  const G1 = await connect();
+  sendW(G1, { t: 'join', room: 'LBB1', id: 'guest1111', name: 'Guest' });
+  m = await waitFor(W, function (x) { return x.t === 'lobby' && x.list.length === 0; }, 'lobby: комната скрыта');
+  ok(Array.isArray(m.list) && m.list.length === 0, 'полная комната исчезла из лобби');
+
+  G1.close();
+  m = await waitFor(W, function (x) { return x.t === 'lobby' && x.list.length === 1; }, 'lobby: снова ждёт');
+  ok(m.list[0] && m.list[0].code === 'LBB1', 'гость ушёл — комната снова в списке');
+
+  /* закрытая (без open) комната в лобби не попадает */
+  const H2 = await connect();
+  sendW(H2, { t: 'join', room: 'LBB2', id: 'host22222', name: 'HostTwo' });
+  await waitFor(H2, function (x) { return x.t === 'joined'; }, 'join H2');
+  await new Promise(function (r) { setTimeout(r, 150); });
+  const lists = W._inbox.filter(function (x) { return x.t === 'lobby'; });
+  ok(!lists.some(function (x) { return (x.list || []).some(function (r) { return r.code === 'LBB2'; }); }),
+     'комната без open в лобби не видна');
+
+  H1.close();
+  m = await waitFor(W, function (x) { return x.t === 'lobby' && x.list.length === 0; }, 'lobby: пусто');
+  ok(true, 'хост ушёл — комната удалена из списка');
+  H2.close();
+
+  /* ============ 5. ПВП-рейтинг и статусы ============ */
+  console.log('\n[5] ПВП-рейтинг (SPEC §28)');
+
+  r = await api('POST', '/api/duel', { winner: 'PvP_A', loser: 'PvP_B', rounds: '2:1', causes: ['bite', 'loop'] });
+  ok(r.status === 201, 'дуэль с причинами принята');
+  r = await api('GET', '/api/pvp?name=PvP_A');
+  ok(r.status === 200 && r.json.me && r.json.me.matches === 1, 'карточка игрока есть');
+  ok(r.json.me.rating > 1000, 'победа подняла рейтинг (' + r.json.me.rating + ')');
+  ok(r.json.me.statuses.indexOf(1) !== -1 && r.json.me.statuses.indexOf(2) !== -1, 'статусы 1-2 выданы');
+  ok(Array.isArray(r.json.top) && r.json.top.some(function (x) { return x.name === 'PvP_A'; }), 'топ содержит игрока');
+
+  /* мусорные причины отфильтрованы, валидные копятся → статус 6 (Кусака) */
+  for (let i = 0; i < 4; i++) {
+    await api('POST', '/api/duel', { winner: 'PvP_A', loser: 'PvP_B', rounds: '2:0', causes: ['hack', 'bite'] });
+  }
+  r = await api('GET', '/api/pvp?name=PvP_A');
+  ok(r.json.me.statuses.indexOf(6) !== -1, '5 побед укусом → статус «Кусака»');
+  ok(r.json.me.statuses.indexOf(11) === -1, 'статус 11 ещё закрыт (нужно 10 сухих побед 2:0)');
+
+  /* проигравший теряет рейтинг, но не ниже пола смысла */
+  r = await api('GET', '/api/pvp?name=PvP_B');
+  ok(r.json.me.rating < 1000, 'проигравший потерял рейтинг (' + r.json.me.rating + ')');
+
+  /* несуществующий игрок */
+  r = await api('GET', '/api/pvp?name=Nobody');
+  ok(r.json.me === null, 'нет карточки у неизвестного игрока');
+  W.close();
+
   /* ============ итог ============ */
   server.close();
   store.flush();

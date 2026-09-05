@@ -28,7 +28,7 @@ if (dictStart < 0 || dictEnd < 0) fail('не найдены словари в js
 const dictBody = src.slice(dictStart, dictEnd);
 const ruBlock = dictBody.slice(dictBody.indexOf('ru: {') + 5, dictBody.indexOf('en: {'));
 const enBlock = dictBody.slice(dictBody.indexOf('en: {') + 5, dictBody.lastIndexOf('}'));
-const keysOf = (b) => new Set([...b.matchAll(/^\s{6}([A-Za-z0-9_]+):\s*'/gm)].map((m) => m[1]));
+const keysOf = (b) => new Set([...b.matchAll(/^\s{6}([A-Za-z0-9_]+):\s*['"]/gm)].map((m) => m[1]));
 const ru = keysOf(ruBlock);
 const en = keysOf(enBlock);
 if (ru.size === 0) fail('словарь ru пуст или не распарсен');

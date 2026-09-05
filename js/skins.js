@@ -44,7 +44,12 @@
       head: [45, 100, 50], tail: [50, 100, 60] },
     { id: 'rainbow', name: 'skinRainbow', cond: 'skinCondRainbow', ach: 'boss5' },
     { id: 'ghost', name: 'skinGhost', cond: 'skinCondGhost', ach: 'mystery10',
-      head: [0, 15, 92], tail: [210, 15, 80], alpha: 0.65 }
+      head: [0, 15, 92], tail: [210, 15, 80], alpha: 0.65 },
+    /* SPEC §28: ПВП-скины — открываются только статусами рейтинга */
+    { id: 'chrome', name: 'skinChrome', cond: 'skinCondChrome', pvp: 9,
+      head: [210, 12, 78], tail: [210, 8, 38] },
+    { id: 'plasma', name: 'skinPlasma', cond: 'skinCondPlasma', pvp: 13,
+      head: [300, 100, 72], tail: [190, 100, 50] }
   ];
 
   /* ---------- state ---------- */
@@ -66,9 +71,20 @@
     return !!(CS.Ach && typeof CS.Ach.has === 'function' && CS.Ach.has(ach));
   }
 
+  /* ПВП-гейт: статус из кэша /api/pvp (duelui обновляет после боёв) */
+  function pvpOpen(statusId) {
+    if (!statusId) return true;
+    const st = CS.DuelUI && typeof CS.DuelUI.pvpStatuses === 'function'
+      ? CS.DuelUI.pvpStatuses()
+      : [];
+    return st.indexOf(statusId) !== -1;
+  }
+
   function unlocked(id) {
     const def = defById(id);
-    return !!def && achOpen(def.ach);
+    if (!def) return false;
+    if (def.pvp) return pvpOpen(def.pvp);   // ПВП-скин: только статус
+    return achOpen(def.ach);
   }
 
   function hsl(h, s, l) {

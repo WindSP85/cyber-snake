@@ -2181,3 +2181,211 @@ body.in-telegram .tg-only {
   font-size: 11px;
   text-shadow: 0 0 8px rgba(0, 240, 255, .4);
 }
+
+/* ============================================================
+   SPEC §28: лобби ожидания, ПВП-рейтинг, статусы, задания
+   ============================================================ */
+
+.lobby-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.lobby-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 46px;
+  padding: 6px 14px;
+  font-family: var(--font);
+  font-size: 15px;
+  color: var(--cyan);
+  background: rgba(0, 240, 255, .04);
+  border: 1px solid rgba(0, 240, 255, .7);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  text-shadow: 0 0 8px rgba(0, 240, 255, .6);
+  box-shadow: 0 0 10px rgba(0, 240, 255, .18);
+}
+
+.lobby-row:active {
+  background: rgba(0, 240, 255, .25);
+}
+
+.lobby-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lobby-join {
+  flex: none;
+  font-size: 12px;
+  letter-spacing: 1px;
+  padding: 3px 10px;
+  border: 1px solid rgba(0, 240, 255, .7);
+  background: rgba(0, 240, 255, .12);
+}
+
+.lobby-empty {
+  margin: 2px 0 10px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+/* карточка моего рейтинга */
+.pvp-card {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 43, 214, .5);
+  background: rgba(255, 43, 214, .06);
+  box-shadow: 0 0 18px rgba(255, 43, 214, .15);
+}
+
+.pvp-rating-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.pvp-badge {
+  font-size: 11px;
+  letter-spacing: 1px;
+  padding: 3px 8px;
+  border: 1px solid rgba(125, 227, 255, .35);
+  color: var(--dim);
+}
+
+.pvp-badge-on {
+  border-color: rgba(255, 43, 214, .8);
+  color: #ff8ee0;
+  text-shadow: 0 0 8px rgba(255, 43, 214, .6);
+}
+
+.pvp-rating {
+  font-size: 18px;
+  color: var(--pink);
+  text-shadow: 0 0 10px rgba(255, 43, 214, .5);
+}
+
+.pvp-record {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+/* топ рейтинга */
+.pvp-top {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 12px;
+}
+
+.pvp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--fg);
+  padding: 3px 6px;
+}
+
+.pvp-row-me {
+  color: var(--cyan);
+  background: rgba(0, 240, 255, .07);
+  text-shadow: 0 0 8px rgba(0, 240, 255, .5);
+}
+
+.pvp-pos {
+  flex: none;
+  width: 22px;
+  color: var(--dim);
+}
+
+.pvp-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pvp-rate {
+  flex: none;
+  color: var(--pink);
+}
+
+.pvp-wl {
+  flex: none;
+  width: 52px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+/* сетка статусов */
+.pvp-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.pvp-chip {
+  font-size: 11px;
+  letter-spacing: .5px;
+  padding: 4px 8px;
+  border: 1px solid rgba(125, 227, 255, .2);
+  color: rgba(125, 227, 255, .35);
+  cursor: help;
+}
+
+.pvp-chip-on {
+  border-color: rgba(0, 240, 255, .8);
+  color: var(--cyan);
+  text-shadow: 0 0 8px rgba(0, 240, 255, .5);
+  box-shadow: 0 0 10px rgba(0, 240, 255, .15);
+}
+
+/* задания */
+.quests-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.quest-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--fg);
+  padding: 6px 8px;
+  border: 1px solid rgba(0, 240, 255, .25);
+}
+
+.quest-done {
+  border-color: rgba(0, 255, 157, .6);
+  color: #00ff9d;
+  text-shadow: 0 0 8px rgba(0, 255, 157, .4);
+}
+
+.quest-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quest-prog {
+  flex: none;
+  font-size: 12px;
+  color: var(--dim);
+}
