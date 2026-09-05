@@ -212,8 +212,9 @@ function sendObj(ws, obj) {
   }
 }
 
-/* список открытых комнат ожидания: [{code, name}] — комната с одним
-   игроком, созданная с флагом open */
+/* список открытых комнат ожидания: [{code, name, rating, w, l, st}] —
+   комната с одним игроком, созданная с флагом open; рейтинг/статусы
+   ждущего подтягиваются из ПВП-статистики (SPEC §28) */
 function lobbyList() {
   const list = [];
   rooms.forEach(function (room, code) {
@@ -221,7 +222,17 @@ function lobbyList() {
     if (!room.createdOpen || room.size !== 1) return;
     let name = 'PLAYER';
     room.forEach(function (m) { name = m.name; });
-    list.push({ code: code, name: String(name).slice(0, 20) });
+    name = String(name).slice(0, 20);
+    const pub = store.pvpPublic(name);
+    const st = pub ? pub.statuses : [];
+    list.push({
+      code: code,
+      name: name,
+      rating: pub ? pub.rating : 1000,
+      w: pub ? pub.wins : 0,
+      l: pub ? pub.losses : 0,
+      st: st.slice(-3) // три старших статуса для строки лобби
+    });
   });
   return list;
 }

@@ -515,6 +515,10 @@
   function applyLang(code) {
     if (CS.I18N && typeof CS.I18N.set === 'function') CS.I18N.set(code);
     showScreen('menu');
+    // applyLang перезапишет текст кнопки лобби из data-i18n — вернём счётчик
+    if (CS.DuelUI && typeof CS.DuelUI.menuCountSync === 'function') {
+      CS.DuelUI.menuCountSync();
+    }
   }
 
   function wire() {

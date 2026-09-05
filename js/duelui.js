@@ -309,13 +309,16 @@
 
   /* ---------- SPEC §28: лобби ожидания (открытые комнаты) ---------- */
 
-  /* список ждущих: приходит с сервера при каждом изменении */
+  /* список ждущих: приходит с сервера при каждом изменении; питает и
+     таблицу лобби, и счётчик на кнопке в меню */
   function startLobbyWatch() {
     if (!CS.Net || typeof CS.Net.watchLobby !== 'function') return;
     try {
       CS.Net.watchLobby(function (list) {
-        if (mode !== 'idle') return; // в комнате список не нужен
-        renderLobbyList(Array.isArray(list) ? list : []);
+        const rows = Array.isArray(list) ? list : [];
+        updateMenuLobbyCount(rows.length);
+        if (mode !== 'idle') return; // в комнате таблица не нужна
+        renderLobbyList(rows);
       });
     } catch (e) {
       /* лобби — необязательная приятность: тихо */
@@ -330,11 +333,36 @@
     }
   }
 
-  /* строки «ИМЯ → ВОЙТИ»: один тап — и гость в комнате без кода */
+  /* живой счётчик на кнопке меню: «ЛОББИ ПВП · 3» */
+  let lobbyCount = -1; // -1 = ещё не знаем (первый ответ ещё не пришёл)
+
+  function updateMenuLobbyCount(n) {
+    const btn = byId('btn-duel');
+    if (!btn) return;
+    lobbyCount = n;
+    try {
+      btn.textContent = t('duel') + (n > 0 ? ' · ' + n : '');
+    } catch (e) {
+      /* текст кнопки не критичен */
+    }
+  }
+
+  /* applyLang затирает кнопку — вернуть счётчик (вызывает ui.js) */
+  function menuCountSync() {
+    if (lobbyCount >= 0) updateMenuLobbyCount(lobbyCount);
+  }
+
+  /* выбранная строка лобби: код + имя для кнопки «ПРИНЯТЬ БОЙ» */
+  let lobbyPick = '';
+
+  /* таблица ждущих: ник · рейтинг · W:L · статусы; клик выбирает
+     строку, «ПРИНЯТЬ БОЙ» входит в комнату */
   function renderLobbyList(list) {
     const box = byId('duel-lobby-list');
     const empty = byId('duel-lobby-empty');
     if (!box) return;
+    const pickGone = lobbyPick && !list.some(function (r) { return r.code === lobbyPick; });
+    if (pickGone) lobbyPick = '';
     box.innerHTML = '';
     if (empty) empty.classList.toggle('hidden', !!list.length);
     for (let i = 0; i < list.length && i < 20; i++) {
@@ -343,20 +371,50 @@
       if (!CODE_RE.test(code)) continue;
       const row = document.createElement('button');
       row.type = 'button';
-      row.className = 'lobby-row';
+      row.className = 'lobby-row' + (code === lobbyPick ? ' lobby-row-pick' : '');
       const nm = document.createElement('span');
       nm.className = 'lobby-name';
       nm.textContent = String(r.name || 'PLAYER').slice(0, 20);
-      const join = document.createElement('span');
-      join.className = 'lobby-join';
-      join.textContent = t('lobbyJoin');
+      const rt = document.createElement('span');
+      rt.className = 'lobby-rate';
+      rt.textContent = String(r.rating | 0 || 1000);
+      const wl = document.createElement('span');
+      wl.className = 'lobby-wl';
+      wl.textContent = (r.w | 0) + ':' + (r.l | 0);
+      const st = document.createElement('span');
+      st.className = 'lobby-st';
+      const sts = Array.isArray(r.st) ? r.st : [];
+      st.textContent = sts.length
+        ? sts.map(function (id) { return t('pvpS' + id); }).join(' · ')
+        : t('pvpNoStatus');
       row.appendChild(nm);
-      row.appendChild(join);
+      row.appendChild(rt);
+      row.appendChild(wl);
+      row.appendChild(st);
       row.addEventListener('click', function () {
         if (busy || mode !== 'idle') return;
-        enterRoom(code, 'guest');
+        lobbyPick = lobbyPick === code ? '' : code;
+        renderLobbyList(list); // перерисовка с выделением
       });
       box.appendChild(row);
+    }
+    renderLobbyAccept(list);
+  }
+
+  /* кнопка «ПРИНЯТЬ БОЙ: ИМЯ» под таблицей — видна при выборе */
+  function renderLobbyAccept(list) {
+    const btn = byId('btn-lobby-accept');
+    if (!btn) return;
+    const pick = lobbyPick && list.filter(function (r) { return r.code === lobbyPick; })[0];
+    btn.classList.toggle('hidden', !pick);
+    if (pick) {
+      btn.textContent = t('lobbyAccept') + ' · ' + String(pick.name || 'PLAYER').slice(0, 20);
+      btn.onclick = function () {
+        if (busy || mode !== 'idle' || !lobbyPick) return;
+        const code = lobbyPick;
+        lobbyPick = '';
+        enterRoom(code, 'guest');
+      };
     }
   }
 
@@ -1048,6 +1106,7 @@
 
   function init() {
     wire();
+    startLobbyWatch(); // счётчик ждущих живёт уже в меню (SPEC §28)
   }
 
   /* ---------- public api ---------- */
@@ -1060,6 +1119,8 @@
     bootDeepLink: bootDeepLink,
     /* game.js goMenu hook: drop the channel + reset the lobby */
     reset: reset,
+    /* ui.js applyLang hook: вернуть счётчик ждущих на кнопку меню */
+    menuCountSync: menuCountSync,
     /* feature T25: the local history — {w, l, streak} and the raw
        rows for ui.js renderBattles (test.html + headless tests too) */
     stats: duelStats,

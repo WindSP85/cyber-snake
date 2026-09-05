@@ -249,11 +249,12 @@
         </div>
 
         <!-- SPEC §28: waiting lobby — anyone without a link sees who
-             waits and joins with ONE tap -->
+             waits; tap a row, then ACCEPT THE BATTLE -->
         <div id="duel-lobby-block" class="duel-block">
           <p class="duel-label" data-i18n="lobbyTitle">ЖДУТ ИГРОКИ</p>
           <div id="duel-lobby-list" class="lobby-list"></div>
           <p id="duel-lobby-empty" class="lobby-empty" data-i18n="lobbyEmpty">Пока никто не ждёт — создайте бой первым!</p>
+          <button id="btn-lobby-accept" class="btn btn-primary lobby-accept hidden" type="button"></button>
         </div>
 
         <!-- the created room: HUGE one-char code plates + the deep link -->

@@ -2193,15 +2193,15 @@ body.in-telegram .tg-only {
   margin: 0 0 10px;
 }
 
+/* строка лобби — мини-табличка: ник · рейтинг · W:L · статусы */
 .lobby-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
-  min-height: 46px;
-  padding: 6px 14px;
+  min-height: 50px;
+  padding: 7px 12px;
   font-family: var(--font);
-  font-size: 15px;
+  font-size: 14px;
   color: var(--cyan);
   background: rgba(0, 240, 255, .04);
   border: 1px solid rgba(0, 240, 255, .7);
@@ -2211,25 +2211,55 @@ body.in-telegram .tg-only {
   touch-action: none;
   text-shadow: 0 0 8px rgba(0, 240, 255, .6);
   box-shadow: 0 0 10px rgba(0, 240, 255, .18);
+  text-align: left;
 }
 
 .lobby-row:active {
   background: rgba(0, 240, 255, .25);
 }
 
+.lobby-row-pick {
+  border-color: var(--pink);
+  background: rgba(255, 43, 214, .1);
+  box-shadow: 0 0 16px rgba(255, 43, 214, .35);
+}
+
 .lobby-name {
+  flex: 1 1 30%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.lobby-join {
+.lobby-rate {
   flex: none;
+  width: 44px;
+  text-align: right;
+  color: var(--pink);
+  font-size: 13px;
+}
+
+.lobby-wl {
+  flex: none;
+  width: 42px;
+  text-align: right;
   font-size: 12px;
-  letter-spacing: 1px;
-  padding: 3px 10px;
-  border: 1px solid rgba(0, 240, 255, .7);
-  background: rgba(0, 240, 255, .12);
+  color: var(--dim);
+}
+
+.lobby-st {
+  flex: 1 1 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  letter-spacing: .5px;
+  color: rgba(125, 227, 255, .6);
+}
+
+.lobby-accept {
+  width: 100%;
+  margin-top: 4px;
 }
 
 .lobby-empty {

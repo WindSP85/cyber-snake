@@ -254,7 +254,9 @@ async function tests() {
   m = await waitFor(H1, function (x) { return x.t === 'joined'; }, 'join H1');
   ok(m.ok === true, 'хост вошёл в открытую комнату');
   m = await waitFor(W, function (x) { return x.t === 'lobby' && x.list.length === 1; }, 'lobby: комната появилась');
-  eq(m.list[0], { code: 'LBB1', name: 'HostOne' }, 'список: код + имя ждущего');
+  ok(m.list[0] && m.list[0].code === 'LBB1' && m.list[0].name === 'HostOne', 'список: код + имя');
+  eq(m.list[0].rating, 1000, 'рейтинг новичка в строке — 1000');
+  ok(Array.isArray(m.list[0].st), 'статусы в строке — массив');
 
   const G1 = await connect();
   sendW(G1, { t: 'join', room: 'LBB1', id: 'guest1111', name: 'Guest' });
@@ -301,6 +303,18 @@ async function tests() {
   /* проигравший теряет рейтинг, но не ниже пола смысла */
   r = await api('GET', '/api/pvp?name=PvP_B');
   ok(r.json.me.rating < 1000, 'проигравший потерял рейтинг (' + r.json.me.rating + ')');
+
+  /* лобби показывает актуальный рейтинг ждущего */
+  r = await api('POST', '/api/duel', { winner: 'LBBR1', loser: 'LBBR2', rounds: '2:0', causes: ['bite', 'bite'] });
+  const LR = await connect();
+  sendW(LR, { t: 'join', room: 'LBR9', id: 'lbr1aaaaaa', name: 'LBBR1', open: true });
+  await waitFor(LR, function (x) { return x.t === 'joined'; }, 'join LBBR1');
+  const LW = await connect();
+  sendW(LW, { t: 'lobby' });
+  m = await waitFor(LW, function (x) { return x.t === 'lobby' && x.list.length === 1; }, 'lobby LBBR1');
+  ok(m.list[0].rating > 1000, 'лобби: рейтинг подрос после победы (' + m.list[0].rating + ')');
+  ok(m.list[0].w === 1, 'лобби: победы в строке');
+  LR.close(); LW.close();
 
   /* несуществующий игрок */
   r = await api('GET', '/api/pvp?name=Nobody');
