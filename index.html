@@ -58,6 +58,7 @@
       <div class="panel">
         <h1 class="title glitch" data-text="NEON://SNAKE">NEON://SNAKE</h1>
         <p class="subtitle" data-i18n="subtitle">киберпротокол v2.077</p>
+        <p id="menu-build" class="menu-build"></p>
         <p class="menu-best"><span data-i18n="bestLabel">Рекорд:</span> <span id="menu-best">0</span></p>
         <div class="menu-buttons">
           <!-- feature T24: online duel entry (SPEC §22) — above "Играть" -->
@@ -240,67 +241,78 @@
 
     <!-- Screen: online duel lobby (feature T24, SPEC §22) -->
     <div id="screen-duel" class="screen hidden">
-      <div class="panel">
-        <h2 class="screen-title" data-i18n="duelTitle">ОНЛАЙН-БОЙ</h2>
+      <div class="panel panel-duel">
 
-        <!-- (a) create a room: the code + the invite link appear below -->
-        <div id="duel-create-block" class="duel-block">
-          <button id="btn-duel-create" class="btn btn-primary" type="button" data-i18n="duelCreate">СОЗДАТЬ БОЙ</button>
-        </div>
+        <!-- ═══ ДОМ-ЭКРАН ЛОББИ: не в комнате ═══ -->
+        <div id="duel-home">
+          <h2 class="screen-title" data-i18n="duelTitle">ЛОББИ ПВП</h2>
 
-        <!-- SPEC §28: waiting lobby — anyone without a link sees who
-             waits; tap a row, then ACCEPT THE BATTLE -->
-        <div id="duel-lobby-block" class="duel-block">
-          <p class="duel-label" data-i18n="lobbyTitle">ЖДУТ ИГРОКИ</p>
-          <div id="duel-lobby-list" class="lobby-list"></div>
-          <p id="duel-lobby-empty" class="lobby-empty" data-i18n="lobbyEmpty">Пока никто не ждёт — создайте бой первым!</p>
-          <button id="btn-lobby-accept" class="btn btn-primary lobby-accept hidden" type="button"></button>
-        </div>
+          <!-- главный экшен — один и крупный -->
+          <button id="btn-duel-create" class="btn btn-primary btn-xl" type="button" data-i18n="duelCreate">СОЗДАТЬ БОЙ</button>
 
-        <!-- the created room: HUGE one-char code plates + the deep link -->
-        <div id="duel-room" class="duel-room hidden">
-          <p class="duel-label" data-i18n="duelCode">КОД КОМНАТЫ</p>
-          <div id="duel-code" class="duel-code"></div>
-          <p id="duel-link" class="duel-link"></p>
-          <div class="duel-actions">
-            <button id="btn-duel-invite" class="btn btn-primary" type="button" data-i18n="duelInviteBtn">ПОВЗВАТЬ В БОЙ</button>
-            <button id="btn-duel-copy" class="btn" type="button" data-i18n="duelCopy">КОПИРОВАТЬ ССЫЛКУ</button>
+          <!-- карточки ждущих: тап выбирает, под ними «ПРИНЯТЬ БОЙ» -->
+          <div id="duel-lobby-block" class="duel-block">
+            <p class="duel-label" data-i18n="lobbyTitle">ЖДУТ ИГРОКИ</p>
+            <div id="duel-lobby-list" class="lobby-cards"></div>
+            <p id="duel-lobby-empty" class="lobby-empty" data-i18n="lobbyEmpty">Пока никто не ждёт — создайте бой первым!</p>
+            <button id="btn-lobby-accept" class="btn btn-primary lobby-accept hidden" type="button"></button>
           </div>
-          <span id="duel-copied" class="duel-copied hidden" data-i18n="duelCopied">СКОПИРОВАНО</span>
-          <!-- clipboard fallback: the link, pre-selected for a manual copy -->
-          <input id="duel-link-copy" class="duel-link-copy hidden" type="text" readonly>
+
+          <!-- второстепенное: код + история -->
+          <div class="duel-secondary">
+            <div id="duel-join-block" class="duel-join-inline">
+              <input id="duel-code-input" class="duel-code-input" type="text" maxlength="4" autocomplete="off" autocapitalize="off" spellcheck="false">
+              <button id="btn-duel-go" class="btn" type="button" data-i18n="duelGo">В БОЙ</button>
+            </div>
+            <button id="btn-battles" class="btn btn-small duel-battles-btn" type="button" data-i18n="battles">МОИ БОИ</button>
+          </div>
         </div>
 
-        <!-- SPEC §28: живая комната — обе строки игроков + готовность;
-             бой стартует сам, когда ГОТОВЫ ОБА -->
-        <div id="duel-room-live" class="duel-room-live hidden">
-          <div class="duel-players">
-            <div class="duel-player duel-player-me">
-              <span class="duel-player-name" data-i18n="duelYouAre">ВЫ — СИНЯЯ ЗМЕЙКА</span>
-              <span id="me-ready" class="ready-badge"></span>
+        <!-- ═══ VS-КОМНАТА: в комнате, до старта ═══ -->
+        <div id="duel-room-live" class="vs-room hidden">
+          <h2 class="screen-title" data-i18n="duelRoomTitle">КОМНАТА БОЯ</h2>
+
+          <div class="vs-grid">
+            <div class="pcard pcard-me">
+              <div class="pcard-ava" id="me-ava">ВЫ</div>
+              <div class="pcard-name" data-i18n="duelYou">ВЫ</div>
+              <div id="me-ready" class="ready-badge"></div>
             </div>
-            <div id="foe-player" class="duel-player hidden">
-              <span id="foe-player-name" class="duel-player-name"></span>
-              <span id="foe-ready" class="ready-badge"></span>
+            <div class="vs-mid">VS</div>
+            <div id="foe-player" class="pcard pcard-foe hidden">
+              <div class="pcard-ava pcard-ava-foe" id="foe-ava">?</div>
+              <div id="foe-player-name" class="pcard-name"></div>
+              <div id="foe-ready" class="ready-badge"></div>
             </div>
           </div>
+          <div id="foe-slot" class="pcard pcard-slot">
+            <div class="pcard-ava pcard-ava-slot">?</div>
+            <div class="pcard-name duel-wait-text" data-i18n="duelWait">ждём соперника…</div>
+          </div>
+
           <p id="duel-ready-hint" class="duel-ready-hint hidden"></p>
-          <button id="btn-duel-ready" class="btn btn-primary" type="button" data-i18n="duelReady">ГОТОВ К БОЮ</button>
-        </div>
 
-        <!-- (b) join by code -->
-        <div id="duel-join-block" class="duel-block">
-          <p class="duel-label" data-i18n="duelJoin">ВОЙТИ ПО КОДУ</p>
-          <div class="duel-join-row">
-            <input id="duel-code-input" class="duel-code-input" type="text" maxlength="4" autocomplete="off" autocapitalize="off" spellcheck="false">
-            <button id="btn-duel-go" class="btn" type="button" data-i18n="duelGo">В БОЙ</button>
+          <!-- код комнаты (хост): компактная строка с приглашением -->
+          <div id="duel-room" class="duel-room hidden">
+            <div class="duel-code-row">
+              <span class="duel-label" data-i18n="duelCode">КОД</span>
+              <div id="duel-code" class="duel-code-inline"></div>
+              <button id="btn-duel-copy" class="btn btn-small" type="button" data-i18n="duelCopy">КОПИРОВАТЬ</button>
+            </div>
+            <div class="duel-actions">
+              <button id="btn-duel-invite" class="btn btn-primary" type="button" data-i18n="duelInviteBtn">ПОЗВАТЬ В БОЙ</button>
+            </div>
+            <span id="duel-copied" class="duel-copied hidden" data-i18n="duelCopied">СКОПИРОВАНО</span>
+            <p id="duel-link" class="duel-link"></p>
+            <input id="duel-link-copy" class="duel-link-copy hidden" type="text" readonly>
           </div>
+
+          <!-- единая главная кнопка: ГОТОВ ↔ НЕ ГОТОВ -->
+          <button id="btn-duel-ready" class="btn btn-xl" type="button" data-i18n="duelReady">ГОТОВ К БОЮ</button>
+          <button id="btn-duel-leave" class="btn btn-small btn-ghost" type="button" data-i18n="duelLeave">ПОКИНУТЬ КОМНАТУ</button>
         </div>
 
-        <!-- feature T25: the local duel history peek -->
-        <button id="btn-battles" class="btn btn-small duel-battles-btn" type="button" data-i18n="battles">МОИ БОИ</button>
-
-        <!-- waiting status: HOST/GUEST · ждём соперника… -->
+        <!-- waiting status: роль · ждём… -->
         <p id="duel-wait" class="duel-wait hidden">
           <span id="duel-role" class="duel-role"></span>
           <span id="duel-youare" class="duel-youare hidden"></span>
@@ -314,7 +326,7 @@
         <!-- inline network error (duelErr*) -->
         <p id="duel-error" class="duel-error hidden"></p>
 
-        <button id="btn-duel-back" class="btn btn-small" type="button" data-i18n="back">Назад</button>
+        <button id="btn-duel-back" class="btn btn-small btn-ghost" type="button" data-i18n="back">Назад</button>
       </div>
     </div>
 
@@ -414,7 +426,5 @@
   <!-- feature T24: the duel lobby ui (SPEC §22) — after ui, before game -->
   <script src="js/duelui.js"></script>
   <script src="js/game.js"></script>
-  <!-- build version: последний элемент body, поверх всего остального -->
-  <span class="ver-badge" aria-hidden="true"></span>
 </body>
 </html>

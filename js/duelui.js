@@ -270,10 +270,8 @@
     setError(null);
     setWait(false);
     show('duel-room', false);
-    show('duel-room-live', false); // SPEC §28: панель готовности — только в комнате
-    show('duel-create-block', true);
-    show('duel-join-block', true);
-    show('duel-lobby-block', true); // SPEC §28: список ждущих виден в лобби
+    show('duel-room-live', false);
+    show('duel-home', true); // дом-экран лобби: карточки + создать + код
     show('duel-link-copy', false);
     show('duel-copied', false);
     show('duel-streak', false); // feature T25: openLobby re-renders it
@@ -372,34 +370,37 @@
       const r = list[i] || {};
       const code = String(r.code || '').toUpperCase();
       if (!CODE_RE.test(code)) continue;
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'lobby-row' + (code === lobbyPick ? ' lobby-row-pick' : '');
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'lobby-card' + (code === lobbyPick ? ' lobby-card-pick' : '');
+      const ava = document.createElement('span');
+      ava.className = 'lc-ava';
+      ava.textContent = initials(String(r.name || 'PLAYER').slice(0, 20));
+      const mid = document.createElement('span');
+      mid.className = 'lc-mid';
       const nm = document.createElement('span');
-      nm.className = 'lobby-name';
+      nm.className = 'lc-name';
       nm.textContent = String(r.name || 'PLAYER').slice(0, 20);
-      const rt = document.createElement('span');
-      rt.className = 'lobby-rate';
-      rt.textContent = String(r.rating | 0 || 1000);
-      const wl = document.createElement('span');
-      wl.className = 'lobby-wl';
-      wl.textContent = (r.w | 0) + ':' + (r.l | 0);
+      const meta = document.createElement('span');
+      meta.className = 'lc-meta';
+      meta.textContent = '\u2605 ' + (r.rating | 0 || 1000) + '  \u00b7  ' + (r.w | 0) + ':' + (r.l | 0);
+      mid.appendChild(nm);
+      mid.appendChild(meta);
       const st = document.createElement('span');
-      st.className = 'lobby-st';
+      st.className = 'lc-st';
       const sts = Array.isArray(r.st) ? r.st : [];
       st.textContent = sts.length
-        ? sts.map(function (id) { return t('pvpS' + id); }).join(' · ')
+        ? sts.map(function (id) { return t('pvpS' + id); }).join(' \u00b7 ')
         : t('pvpNoStatus');
-      row.appendChild(nm);
-      row.appendChild(rt);
-      row.appendChild(wl);
-      row.appendChild(st);
-      row.addEventListener('click', function () {
+      card.appendChild(ava);
+      card.appendChild(mid);
+      card.appendChild(st);
+      card.addEventListener('click', function () {
         if (busy || mode !== 'idle') return;
         lobbyPick = lobbyPick === code ? '' : code;
         renderLobbyList(list); // перерисовка с выделением
       });
-      box.appendChild(row);
+      box.appendChild(card);
     }
     renderLobbyAccept(list);
   }
@@ -534,12 +535,7 @@
       renderCode(code);
       setText('duel-link', LINK_TEXT + code);
       show('duel-room', true);
-      show('duel-create-block', false);
-      show('duel-join-block', false);
-      show('duel-lobby-block', false);
     } else {
-      show('duel-create-block', false);
-      show('duel-lobby-block', false);
       const input = byId('duel-code-input');
       if (input) {
         input.value = code;
@@ -548,7 +544,10 @@
       const goBtn = byId('btn-duel-go');
       if (goBtn) goBtn.disabled = true;
     }
-    renderReadyUi(); // панель игроков + «ГОТОВ К БОЮ» (SPEC §28)
+    show('duel-home', false);
+    const mine = CS.Net && typeof CS.Net.myName === 'function' ? CS.Net.myName() : '';
+    setText('me-ava', initials(mine || t('duelYou')));
+    renderReadyUi(); // VS-панель + «ГОТОВ К БОЮ» (SPEC §28)
     setWait(true);
     const tok = flow;
     CS.Net.join(code, function (res) {
@@ -565,6 +564,11 @@
     }, { open: !!open }); // SPEC §28: хост создаёт «открытую» комнату
   }
 
+  /* первые буквы ника для аватарки карточки */
+  function initials(name) {
+    return String(name || '?').trim().slice(0, 2).toUpperCase() || '?';
+  }
+
   /* ---------- SPEC §28: панель готовности в комнате ---------- */
 
   /* обе строки (я + соперник) с бейджами ГОТОВ/НЕ ГОТОВ; кнопка
@@ -576,9 +580,13 @@
     const meBadge = byId('me-ready');
     const foeRow = byId('foe-player');
     const foeBadge = byId('foe-ready');
+    const foeSlot = byId('foe-slot');
     if (btn) {
-      btn.disabled = !connected || myReady || inMatch();
-      btn.textContent = myReady ? t('duelReadyWait') : t('duelReady');
+      /* переключатель: не готов → «ГОТОВ К БОЮ» (основная), готов →
+         «НЕ ГОТОВ» (отмена) — вернуться можно в любой момент */
+      btn.disabled = !connected || inMatch();
+      btn.textContent = myReady ? t('duelNotReady') : t('duelReady');
+      btn.className = 'btn btn-xl ' + (myReady ? 'btn-ready-on' : 'btn-primary');
     }
     if (meBadge) {
       meBadge.textContent = myReady ? t('duelReadyBadge') : t('duelNotReady');
@@ -587,28 +595,49 @@
     const foeHere = mode !== 'idle' && connected && foeName && !inMatch() && !foeGone;
     if (foeRow) {
       foeRow.classList.toggle('hidden', !foeHere);
-      if (foeHere) setText('foe-player-name', foeName);
+      if (foeHere) {
+        setText('foe-player-name', foeName);
+        setText('foe-ava', initials(foeName));
+      }
     }
+    if (foeSlot) foeSlot.classList.toggle('hidden', !!foeHere);
     if (foeBadge) {
       foeBadge.textContent = foeReady ? t('duelReadyBadge') : t('duelNotReady');
       foeBadge.className = 'ready-badge' + (foeReady ? ' ready-on' : '');
     }
     if (hint) {
-      const show = foeHere && foeReady && !myReady;
-      hint.classList.toggle('hidden', !show);
-      if (show) hint.textContent = t('duelFoeReady');
+      let txt = '';
+      if (myReady && foeHere && !foeReady) txt = t('duelReadyWait');
+      else if (foeHere && foeReady && !myReady) txt = t('duelFoeReady');
+      hint.classList.toggle('hidden', !txt);
+      if (txt) hint.textContent = txt;
     }
   }
 
   /* «ГОТОВ К БОЮ»: флаг себе, сообщение сопернику; хост при двух
      флагах стартует матч сам */
   function onReady() {
-    if (!connected || myReady || inMatch() || mode === 'idle') return;
-    myReady = true;
-    netSend('ready', null);
+    if (!connected || inMatch() || mode === 'idle') return;
+    myReady = !myReady; // переключатель: ГОТОВ ↔ НЕ ГОТОВ
+    netSend(myReady ? 'ready' : 'unready', null);
     renderReadyUi();
     if (CS.TG && typeof CS.TG.haptic === 'function') CS.TG.haptic('click');
     maybeAutoStart();
+  }
+
+  /* «ПОКИНУТЬ КОМНАТУ»: попрощаться и вернуться на дом-экран лобби */
+  function onLeaveRoom() {
+    if (inMatch()) return;
+    netSend('bye', null);
+    try {
+      if (CS.Net && typeof CS.Net.leave === 'function') CS.Net.leave();
+    } catch (e) {
+      /* канал уже мёртв */
+    }
+    mode = 'idle';
+    connected = false;
+    flow++;
+    resetLobby();
   }
 
   /* старт срабатывает один раз: оба готовы и мы хост */
@@ -991,11 +1020,13 @@
       }
       return;
     }
-    if (type === 'ready') {
-      /* SPEC §28: соперник нажал «ГОТОВ К БОЮ» */
-      foeReady = true;
+    if (type === 'ready' || type === 'unready') {
+      /* SPEC §28: соперник переключил готовность */
+      foeReady = type === 'ready';
       renderReadyUi();
-      if (CS.TG && typeof CS.TG.haptic === 'function') CS.TG.haptic('success');
+      if (type === 'ready' && CS.TG && typeof CS.TG.haptic === 'function') {
+        CS.TG.haptic('success');
+      }
       maybeAutoStart();
       return;
     }
@@ -1153,6 +1184,7 @@
     bind('btn-duel-copy', onCopy);
     bind('btn-duel-go', onGo);
     bind('btn-duel-ready', onReady); // SPEC §28: проверка готовности
+    bind('btn-duel-leave', onLeaveRoom);
     bind('btn-duel-back', toMenu);
     bind('btn-duel-rematch', onRematch);
     bind('btn-duel-exit', exitAfterMatch);
