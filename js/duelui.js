@@ -74,6 +74,8 @@
   let lastLobbyRows = [];   // последний список ждущих (для «БЫСТРЫЙ БОЙ»)
   let lobbyOnlineCount = 0; // сколько людей сейчас в лобби
   let foeWasHere = false;   // соперник уже появлялся (для тоста «нашёлся»)
+  let rejoinTimer = 0;      // обрыв связи в бою: таймер переподключения
+  let rejoinTries = 0;      // попыток войти обратно (5 × 2 c ≈ серверный грейс)
 
   /* ---------- dom / i18n helpers ---------- */
 
@@ -276,6 +278,7 @@
     }
     setError(null);
     setWait(false);
+    stopRejoin(); // переподключения больше не актуальны
     show('duel-room', false);
     show('duel-room-live', false);
     show('duel-home', true); // дом-экран лобби: карточки + создать + код
@@ -709,6 +712,7 @@
     rematchMine = false;
     rematchFoe = false;
     foeGone = false;
+    stopRejoin(); // свежий матч — счётчик обрывов с нуля
     myCauses = [];
     foeCauses = [];
     setError(null);
@@ -973,10 +977,60 @@
     /* новый матч начнёт сервер, когда оба попросят реванш */
   }
 
+  /* ---------- обрыв связи в бою: вернуться в живой матч ---------- */
+
+  /* сервер терпит обрыв 8 с и держит матч; клиент при падении сокета
+     молотит join заново — при успехе снапшоты продолжат кормить
+     живой CS.Duel и бой продолжится как ни чего не было */
+  function stopRejoin() {
+    if (rejoinTimer) {
+      window.clearTimeout(rejoinTimer);
+      rejoinTimer = 0;
+    }
+    rejoinTries = 0;
+  }
+
+  function tryRejoin() {
+    rejoinTimer = 0;
+    if (mode === 'idle' || !started || ended) {
+      rejoinTries = 0;
+      return;
+    }
+    if (rejoinTries >= 5) return; // ~10 c: хватит, дальше — честный abort
+    rejoinTries++;
+    const code = roomCode;
+    const tok = flow;
+    try {
+      CS.Net.join(code, function (res) {
+        if (tok !== flow || mode === 'idle' || ended) return;
+        if (res && res.ok) {
+          connected = true;
+          rejoinTries = 0; // снапшоты продолжат живой бой
+          if (myReady) netSend('ready', null);
+          return;
+        }
+        rejoinTimer = window.setTimeout(tryRejoin, 2000);
+      });
+    } catch (e) {
+      rejoinTimer = window.setTimeout(tryRejoin, 2000);
+    }
+  }
+
+  function scheduleRejoin() {
+    if (rejoinTimer || rejoinTries >= 5) return;
+    rejoinTimer = window.setTimeout(tryRejoin, 400);
+  }
+
   /* ---------- presence / messages ---------- */
 
   function handlePresence(list, diff) {
     if (mode === 'idle') return;
+    /* сокет умер (нет список пуст): это обрыв, а не уход соперника —
+     пытаемся вернуться в бой, пока сервер держит грейс */
+    if (!Array.isArray(list) || !list.length) {
+      if (started && !ended) scheduleRejoin();
+      return;
+    }
     let others = 0;
     if (Array.isArray(list)) {
       for (let i = 0; i < list.length; i++) {

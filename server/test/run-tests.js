@@ -389,10 +389,63 @@ async function tests() {
   const rB = await waitFor(DB, function (x) { return x.t === 'msg' && x.type === 'start'; }, 'реванш: start B', 5000);
   ok(rA.data.side === 0 && rB.data.side === 1, 'реванш: стороны сохранены');
 
-  /* выход из живого матча: бой умирает, соперник получает presence-уход */
+  /* ============ 5b. Обрывы связи: окно терпения ============ */
+  console.log('\n[5b] Обрывы связи (грейс 8 с)');
+
+  const GA = await connect();
+  sendW(GA, { t: 'join', room: 'GRC1', id: 'graceaaaa', name: 'GracerA', open: true });
+  await waitFor(GA, function (x) { return x.t === 'joined'; }, 'join GA');
+  const GB = await connect();
+  sendW(GB, { t: 'join', room: 'GRC1', id: 'gracebbbb', name: 'GracerB' });
+  await waitFor(GB, function (x) { return x.t === 'joined'; }, 'join GB');
+  sendW(GA, { t: 'msg', type: 'ready', data: null });
+  sendW(GB, { t: 'msg', type: 'ready', data: null });
+  await waitFor(GA, function (x) { return x.t === 'msg' && x.type === 'start'; }, 'start GA', 5000);
+  await waitFor(GB, function (x) { return x.t === 'msg' && x.type === 'state'; }, 'снапшот GB', 5000);
+
+  /* комната с идущим боем не виснет в лобби ожидания */
+  const GL = await connect();
+  sendW(GL, { t: 'lobby' });
+  m = await waitFor(GL, function (x) { return x.t === 'lobby'; }, 'lobby список');
+  ok(!m.list.some(function (x) { return x.code === 'GRC1'; }), 'бой идёт — комнаты нет в лобби');
+  GL.close();
+
+  /* обрыв A: грейс держит матч — presence не сжимается, снапшоты идут */
+  GA.close();
+  await new Promise(function (rs) { setTimeout(rs, 1500); });
+  ok(!GB._inbox.some(function (x) { return x.t === 'presence' && x.list.length === 1; }),
+    'грейс: ухода соперника ещё нет');
+  const snapsBefore = GB._inbox.filter(function (x) { return x.t === 'msg' && x.type === 'state'; }).length;
+  await new Promise(function (rs) { setTimeout(rs, 800); }); // несколько снапшотов
+  ok(GB._inbox.filter(function (x) { return x.t === 'msg' && x.type === 'state'; }).length > snapsBefore,
+    'матч живёт, пока A в обрыве');
+
+  /* постороннему вход закрыт на время боя */
+  const GC = await connect();
+  sendW(GC, { t: 'join', room: 'GRC1', id: 'gracecccc', name: 'Stranger' });
+  m = await waitFor(GC, function (x) { return x.t === 'joined'; }, 'join GC');
+  ok(m.ok === false && m.error === 'full', 'бой идёт: посторонний получил full');
+  GC.close();
+
+  /* A вернулся в срок — сразу в бой, состав полон */
+  const GA2 = await connect();
+  sendW(GA2, { t: 'join', room: 'GRC1', id: 'graceaaaa', name: 'GracerA' });
+  m = await waitFor(GA2, function (x) { return x.t === 'joined'; }, 'rejoin GA');
+  ok(m.ok === true, 'возврат в комнату принят');
+  m = await waitFor(GA2, function (x) { return x.t === 'msg' && x.type === 'start'; }, 'start вернувшемуся', 5000);
+  ok(m.data.side === 0, 'сторона сохранена при возврате');
+  await waitFor(GB, function (x) { return x.t === 'presence' && x.list.length === 2; }, 'состав снова полон', 4000);
+
+  /* финальный уход: грейс истёк — соперник получает presence-уход */
+  GA2.close();
+  m = await waitFor(GB, function (x) { return x.t === 'presence' && x.list.length === 1; }, 'грейс истёк: A ушёл', 12000);
+  ok(m.list[0].id === 'gracebbbb', 'остался B');
+  GB.close();
+
+  /* выход из живого матча: грейс истёк — соперник получает presence-уход */
   sendW(DA, { t: 'msg', type: 'turn', data: { dir: 'up' } });
   DA.close();
-  m = await waitFor(DB, function (x) { return x.t === 'presence' && x.list.length === 1; }, 'presence: A ушёл', 5000);
+  m = await waitFor(DB, function (x) { return x.t === 'presence' && x.list.length === 1; }, 'presence: A ушёл (грейс истёк)', 12000);
   ok(m.list[0].id === 'duelbbbb', 'в комнате остался B');
   await new Promise(function (rs) { setTimeout(rs, 400); });
   const statesAfter = DB._inbox.filter(function (x) {
@@ -402,6 +455,30 @@ async function tests() {
   ok(DB._inbox.filter(function (x) { return x.t === 'msg' && x.type === 'state'; }).length === statesAfter,
     'симуляция остановлена после ухода игрока');
   DB.close();
+
+  /* ============ 6. Сезоны ПВП ============ */
+  console.log('\n[6] Сезоны ПВП');
+
+  store.addPvpResult({ winner: 'SEASON_A', loser: 'SEASON_B', wRounds: 2, lRounds: 0, causes: ['bite'] });
+  for (let i = 0; i < 12; i++) {
+    store.addPvpResult({ winner: 'SEASON_A', loser: 'SEASON_B', wRounds: 2, lRounds: 1 });
+  }
+  const before = store.pvpPublic('SEASON_A');
+  ok(before.rating > 1000, 'в сезоне рейтинг растёт (' + before.rating + ')');
+  ok(before.statuses.indexOf(2) !== -1, 'статус «первая кровь» получен');
+
+  /* смена месяца: сезонное сбрасывается, пожизненное — никогда */
+  store.pvp.season = '2020-01';
+  store._pvpSeasonCheck();
+  const after = store.pvpPublic('SEASON_A');
+  ok(after.rating === 1000, 'новый сезон: рейтинг с чистого листа');
+  ok(after.wins === 0 && after.matches === 0, 'сезонные победы/матчи обнулены');
+  ok(after.statuses.indexOf(1) !== -1 && after.statuses.indexOf(2) !== -1,
+    'пожизненные статусы пережили смену сезона');
+  ok(Array.isArray(store.pvp.history) && store.pvp.history.length >= 1 &&
+    store.pvp.history[0].season === '2020-01' &&
+    store.pvp.history[0].top.some(function (x) { return x.name === 'SEASON_A'; }),
+    'топ ушедшего сезона — в истории');
 
   /* ============ итог ============ */
   server.close();

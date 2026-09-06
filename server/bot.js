@@ -68,10 +68,11 @@ const WELCOME =
   '⚡ NEON://SNAKE — киберпанк-змейка с боссами и онлайн-дуэлями!\n\n' +
   '▶ Жми кнопку внизу — и в бой.\n' +
   '🏆 /top — топ сезона\n' +
+  '⚔ /pvp — рейтинг онлайн-боёв\n' +
   '⚔ Онлайн-бой → «Позвать в бой» — позови друга из любого чата.';
 
 const HELP =
-  'Я живой 🙂 Команды: /top — топ сезона. Игра — кнопка внизу.';
+  'Я живой 🙂 Команды: /top — топ сезона, /pvp — рейтинг боёв. Игра — кнопка внизу.';
 
 /* ---------- SOCKS5 без зависимостей (рукопожатие + CONNECT) ----------
    Возвращает ГОЛЫЙ сокет до API_HOST:443; TLS поверх него делает
@@ -232,6 +233,19 @@ async function handle(token, gameUrl, store, msg) {
       : 'Пока пусто — стань первым чемпионом!';
     await post(token, 'sendMessage', {
       chat_id: chatId, text: '🏆 ТОП-5 СЕЗОНА:\n' + body, reply_markup: kb
+    }, 15000);
+    return;
+  }
+
+  if (cmd === '/pvp') {
+    const rows = store.pvpTop(5);
+    const body = rows.length
+      ? rows.map(function (x, i) {
+          return (i + 1) + '. ' + x.name + ' — ' + x.rating + ' (' + x.wins + ':' + x.losses + ')';
+        }).join('\n')
+      : 'Пока никто не сражался — начни первым!';
+    await post(token, 'sendMessage', {
+      chat_id: chatId, text: '⚔️ РЕЙТИНГ ПВП:\n' + body, reply_markup: kb
     }, 15000);
     return;
   }

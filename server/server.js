@@ -207,6 +207,7 @@ const MAX_ROOM_MEMBERS = 2;  // 1×1: третий лишний
 const MAX_SOCKETS = 300;     // защита от исчерпания памяти
 const PING_EVERY = 15000;    // протокольный ping всем сокетам
 const LOBBY_MAX = 50;        // максимум строк в списке лобби
+const GRACE_MS = 8000;       // окно на возврат после обрыва связи
 let sockets = 0;
 
 function sendObj(ws, obj) {
@@ -224,6 +225,7 @@ function sendObj(ws, obj) {
 function lobbyList() {
   const all = [];
   rooms.forEach(function (room, code) {
+    if (room.match && !room.match.done()) return; // идёт бой: не ждёт
     if (!room.createdOpen || room.size !== 1) return;
     let name = 'PLAYER';
     room.forEach(function (m) { name = m.name; });
@@ -416,18 +418,39 @@ function leaveRoom(ws) {
   /* not removed = этот id уже переприсоединился новым сокетом:
      состав не менялся — ничего не трогаем */
   if (room.size === 0) {
+    if (room.graceTimer) {
+      clearTimeout(room.graceTimer);
+      room.graceTimer = null;
+    }
+    room.match = null;
     rooms.delete(code);
     pushLobby(); // комната исчезла из списка ожидания
   } else if (removed) {
     if (room.ready) delete room.ready[ws._id];
     if (room.rematch) delete room.rematch[ws._id];
     if (room.match && !room.match.done()) {
-      room.match = null; // бой без одного игрока не крутится:
-                         // оставшийся получит presence-уход и abort
+      /* короткий обрыв (лифт/метро): даём игроку GRACE_MS на возврат —
+         матч живёт, presence не трогаем, оставшийся просто видит,
+         как соперник едет прямо; не вернётся — тогда и похороны */
+      startGrace(code, room);
+      return;
     }
+    room.match = null;
     broadcastPresence(code);
     pushLobby(); // снова один игрок — комната снова ждёт
   }
+}
+
+/* окно терпения к обрывам: по истечении матч умирает честно */
+function startGrace(code, room) {
+  if (room.graceTimer) return;
+  room.graceTimer = setTimeout(function () {
+    room.graceTimer = null;
+    if (!room.match || room.match.done()) return;
+    room.match = null; // не вернулся — оставшийся получит presence-уход
+    broadcastPresence(code);
+    pushLobby();
+  }, GRACE_MS);
 }
 
 function handleJson(ws, msg) {
@@ -463,7 +486,14 @@ function handleJson(ws, msg) {
       room.match = null;       // живой матч (симуляция на сервере)
       room.sideOf = {};        // id → сторона 0|1 в матче
       room.snapAcc = 0;        // накопитель между снапшотами
+      room.graceTimer = null;  // окно терпения к обрывам
       rooms.set(code, room);
+    }
+    /* бой идёт: вход только своим (переподключение после обрыва) */
+    if (room.match && !room.match.done() &&
+        room.sideOf[id] !== 0 && room.sideOf[id] !== 1) {
+      sendObj(ws, { t: 'joined', ok: false, error: 'full' });
+      return;
     }
     if (room.size >= MAX_ROOM_MEMBERS && !room.has(id)) {
       sendObj(ws, { t: 'joined', ok: false, error: 'full' });
@@ -478,6 +508,12 @@ function handleJson(ws, msg) {
     ws._id = id;
     room.set(id, { ws: ws, id: id, name: name });
     sendObj(ws, { t: 'joined', ok: true });
+    /* вернулся в срок — окно терпения больше не тикает */
+    if (room.graceTimer) {
+      clearTimeout(room.graceTimer);
+      room.graceTimer = null;
+      broadcastPresence(code); // состав снова полон
+    }
     /* переподключение в живой матч: сразу обратно в бой */
     if (room.match && !room.match.done() &&
         (room.sideOf[id] === 0 || room.sideOf[id] === 1)) {

@@ -196,15 +196,51 @@ function dayKey() {
     '-' + String(d.getDate()).padStart(2, '0');
 }
 
+/* ключ ПВП-сезона: 'YYYY-MM' — рейтинг месячный */
+function monthKey() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+
 Store.prototype._pvpLoad = function () {
   if (this.pvp) return;
   const data = this._load('pvp.json');
   this.pvp = isObj(data) && isObj(data.players) ? data : { players: {} };
   this._dirtyPvp = false;
+  this._pvpSeasonCheck();
+};
+
+/* ПВП-сезоны: при смене месяца сезонные поля (рейтинг, победы,
+   серии) сбрасываются, а пожизненные — рекорды и счётчики статусов
+   (lt*) — живут вечно; топ-3 ушедшего сезона уходит в историю */
+Store.prototype._pvpSeasonCheck = function () {
+  const cur = monthKey();
+  if (this.pvp.season === cur) return;
+  const prev = this.pvp.season || '';
+  this.pvp.season = cur;
+  if (!prev) return; // первое включение или старые данные: только метка
+  const top = this.pvpTop(3); // фиксируем ДО сброса
+  for (const name in this.pvp.players) {
+    if (!Object.prototype.hasOwnProperty.call(this.pvp.players, name)) continue;
+    const p = this.pvp.players[name];
+    p.rating = RATING_START;
+    p.wins = 0; p.losses = 0; p.matches = 0;
+    p.streakCur = 0;
+    p.roundsWon = 0; p.roundsLost = 0;
+    p.prev = ''; p.dayKey = ''; p.winsToday = 0;
+  }
+  if (top.length) {
+    if (!Array.isArray(this.pvp.history)) this.pvp.history = [];
+    this.pvp.history.unshift({ season: prev, top: top });
+    this.pvp.history = this.pvp.history.slice(0, 12);
+  }
+  this._dirtyPvp = true;
+  this._schedulePvp();
 };
 
 Store.prototype._pvpPlayer = function (name) {
   this._pvpLoad();
+  this._pvpSeasonCheck(); // долгоживущий процесс может перейти месяц
   const key = String(name || '').slice(0, 20);
   if (!this.pvp.players[key]) {
     this.pvp.players[key] = {
@@ -216,10 +252,24 @@ Store.prototype._pvpPlayer = function (name) {
       roundsWon: 0, roundsLost: 0,
       opponents: {},
       prev: '',                 // результат прошлого матча: win|loss|draw
-      dayKey: '', winsToday: 0
+      dayKey: '', winsToday: 0,
+      /* пожизненные двойники: кормят статусы, сезоном не сбрасываются */
+      ltMatches: 0, ltWins: 0, ltClean: 0, ltComeback: 0,
+      ltBite: 0, ltLoop: 0, ltRoundsWon: 0
     };
   }
-  return this.pvp.players[key];
+  /* миграция старых записей: накопленное считается пожизненным */
+  const p = this.pvp.players[key];
+  if (p.ltMatches === undefined) {
+    p.ltMatches = p.matches || 0;
+    p.ltWins = p.wins || 0;
+    p.ltClean = p.cleanWins || 0;
+    p.ltComeback = p.comeback || 0;
+    p.ltBite = p.biteWins || 0;
+    p.ltLoop = p.loopWins || 0;
+    p.ltRoundsWon = p.roundsWon || 0;
+  }
+  return p;
 };
 
 Store.prototype._schedulePvp = function () {
@@ -264,8 +314,11 @@ Store.prototype.addPvpResult = function (rec) {
 
   W.matches++;
   L.matches++;
+  W.ltMatches++;
+  L.ltMatches++;
   W.roundsWon += wR; W.roundsLost += lR;
   L.roundsWon += lR; L.roundsLost += wR;
+  W.ltRoundsWon += wR;
 
   if (wR === lR) {
     /* ничья: рейтинг не трогаем, серии не ломаем */
@@ -279,17 +332,19 @@ Store.prototype.addPvpResult = function (rec) {
 
     W.wins++;
     L.losses++;
+    W.ltWins++;
     W.winsToday++;
     W.streakCur = W.streakCur >= 0 ? W.streakCur + 1 : 1;
     W.streakBest = Math.max(W.streakBest, W.streakCur);
     L.streakCur = 0;
     if (W.prev === 'loss') W.comeback++; // победа сразу после своего поражения
-    if (spread >= 2) W.cleanWins++;
+    if (spread >= 2) { W.cleanWins++; W.ltClean++; }
     for (let i = 0; i < causes.length; i++) {
-      if (causes[i] === 'bite') W.biteWins++;
-      else if (causes[i] === 'loop') W.loopWins++;
+      if (causes[i] === 'bite') { W.biteWins++; W.ltBite++; }
+      else if (causes[i] === 'loop') { W.loopWins++; W.ltLoop++; }
       else if (causes[i] === 'headon') W.headonWins++;
     }
+    if (W.prev === 'loss') W.ltComeback++;
     /* галерея разных побеждённых соперников */
     if (!W.opponents[loser] && Object.keys(W.opponents).length < PVP_OPPONENTS_MAX) {
       W.opponents[loser] = 1;
@@ -306,29 +361,38 @@ Store.prototype.addPvpResult = function (rec) {
 
 /* статусы 1..20 — только по фактической статистике; тексты
    согласованы с семейством pvpS1..pvpS20 в js/i18n.js */
+/* статусы ПВП — ПОЖИЗНЕННЫЕ достижения: читают lt*-счётчики и рекорды,
+   сезонный сброс рейтинга их не отбирает */
 Store.prototype.pvpStatuses = function (p) {
   const ids = [];
   const oppCount = Object.keys(p.opponents || {}).length;
-  if (p.matches >= 1) ids.push(1);            // Новобранец Сети
-  if (p.wins >= 1) ids.push(2);               // Первая кровь
-  if (p.matches >= 10) ids.push(3);           // Дуэлянт
-  if (p.wins >= 10) ids.push(4);              // Охотник
-  if (p.streakBest >= 3) ids.push(5);         // Серийный
-  if (p.biteWins >= 5) ids.push(6);           // Кусака
-  if (p.loopWins >= 3) ids.push(7);           // Кольцевик
-  if (p.matches >= 25) ids.push(8);           // Ветеран арены
-  if (p.bestRating >= 1200) ids.push(9);      // Хромир
-  if (p.wins >= 25) ids.push(10);             // Гладиатор
-  if (p.cleanWins >= 10) ids.push(11);        // Разрушитель
-  if (p.comeback >= 5) ids.push(12);          // Мститель
-  if (p.bestRating >= 1400) ids.push(13);     // Неоновый
-  if (p.winsToday >= 3) ids.push(14);         // Ночной штурм
-  if (p.roundsWon >= 30) ids.push(15);        // Тактик
-  if (p.bestRating >= 1600) ids.push(16);     // Титан
-  if (p.wins >= 100) ids.push(17);            // Легенда арены
-  if (p.streakBest >= 10) ids.push(18);       // Идеальная серия
-  if (oppCount >= 10) ids.push(19);           // Пожиратель чемпионов
-  if (p.bestRating >= 1800) ids.push(20);     // Абсолют
+  const m = p.ltMatches !== undefined ? p.ltMatches : p.matches;
+  const w = p.ltWins !== undefined ? p.ltWins : p.wins;
+  const bite = p.ltBite !== undefined ? p.ltBite : p.biteWins;
+  const loop = p.ltLoop !== undefined ? p.ltLoop : p.loopWins;
+  const clean = p.ltClean !== undefined ? p.ltClean : p.cleanWins;
+  const cb = p.ltComeback !== undefined ? p.ltComeback : p.comeback;
+  const rw = p.ltRoundsWon !== undefined ? p.ltRoundsWon : p.roundsWon;
+  if (m >= 1) ids.push(1);            // Новобранец Сети
+  if (w >= 1) ids.push(2);            // Первая кровь
+  if (m >= 10) ids.push(3);           // Дуэлянт
+  if (w >= 10) ids.push(4);           // Охотник
+  if (p.streakBest >= 3) ids.push(5); // Серийный
+  if (bite >= 5) ids.push(6);         // Кусака
+  if (loop >= 3) ids.push(7);         // Кольцевик
+  if (m >= 25) ids.push(8);           // Ветеран арены
+  if (p.bestRating >= 1200) ids.push(9);   // Хромир
+  if (w >= 25) ids.push(10);          // Гладиатор
+  if (clean >= 10) ids.push(11);      // Разрушитель
+  if (cb >= 5) ids.push(12);          // Мститель
+  if (p.bestRating >= 1400) ids.push(13);  // Неоновый
+  if (p.winsToday >= 3) ids.push(14); // Ночной штурм
+  if (rw >= 30) ids.push(15);         // Тактик
+  if (p.bestRating >= 1600) ids.push(16);  // Титан
+  if (w >= 100) ids.push(17);         // Легенда арены
+  if (p.streakBest >= 10) ids.push(18);    // Идеальная серия
+  if (oppCount >= 10) ids.push(19);   // Пожиратель чемпионов
+  if (p.bestRating >= 1800) ids.push(20);  // Абсолют
   return ids;
 };
 

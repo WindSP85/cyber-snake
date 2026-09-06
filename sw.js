@@ -8,7 +8,7 @@
    ============================================================ */
 'use strict';
 
-const VERSION = 'v17';
+const VERSION = 'v18';
 const CACHE = 'neon-snake-' + VERSION;
 const SHELL = [
   './',

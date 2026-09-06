@@ -60,7 +60,10 @@
   const TRAP_SLOWMO = 1;          // slow-mo length, s
   const TRAP_SLOW_FACTOR = 0.2;   // simulation speed while trapped
   const STATE_INTERVAL = 0.0625;  // host snapshot broadcast, s (T27: 16/s)
-  const STATE_TIMEOUT = 3;        // guest rival-drop threshold, s
+  const STATE_TIMEOUT = 10;       // guest rival-drop threshold, s —
+                                  // больше серверного грейса (8 c): обрыв
+                                  // связи лечится переподключением, и матч
+                                  // не рвётся из-за пары секунд тишины
   const SNAP_LERP = 0.12;         // guest head lerp window, s
   const TICK_GUARD = 6;           // max ticks per update frame
 
