@@ -254,7 +254,9 @@
 
           <!-- карточки ждущих: тап выбирает, под ними «ПРИНЯТЬ БОЙ» -->
           <div id="duel-lobby-block" class="duel-block">
-            <p class="duel-label" data-i18n="lobbyTitle">ЖДУТ ИГРОКИ</p>
+            <p class="duel-label">
+              <span data-i18n="lobbyTitle">ЖДУТ ИГРОКИ</span><span id="lobby-count"></span>
+            </p>
             <div id="duel-lobby-list" class="lobby-cards"></div>
             <p id="duel-lobby-empty" class="lobby-empty" data-i18n="lobbyEmpty">Пока никто не ждёт — создайте бой первым!</p>
             <button id="btn-lobby-accept" class="btn btn-primary lobby-accept hidden" type="button"></button>

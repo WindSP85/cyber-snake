@@ -366,15 +366,18 @@
   function renderLobbyList(list) {
     const box = byId('duel-lobby-list');
     const empty = byId('duel-lobby-empty');
+    const counter = byId('lobby-count');
     if (!box) return;
     const pickGone = lobbyPick && !list.some(function (r) { return r.code === lobbyPick; });
     if (pickGone) lobbyPick = '';
     box.innerHTML = '';
     if (empty) empty.classList.toggle('hidden', !!list.length);
+    let drawn = 0;
     for (let i = 0; i < list.length && i < 20; i++) {
       const r = list[i] || {};
       const code = String(r.code || '').toUpperCase();
       if (!CODE_RE.test(code)) continue;
+      drawn++;
       const card = document.createElement('button');
       card.type = 'button';
       card.className = 'lobby-card' + (code === lobbyPick ? ' lobby-card-pick' : '');
@@ -407,23 +410,37 @@
       });
       box.appendChild(card);
     }
+    /* живой счётчик в заголовке: «ЖДУТ ИГРОКИ · N» */
+    if (counter) counter.textContent = drawn ? ' \u00b7 ' + drawn : '';
     renderLobbyAccept(list);
   }
 
-  /* кнопка «ПРИНЯТЬ БОЙ: ИМЯ» под таблицей — видна при выборе */
+  /* кнопка под таблицей: пока никто не выбран — постоянно видима как
+     подсказка «ВЫБЕРИТЕ ИГРОКА» (иначе игрок не догадывается тапнуть
+     карточку); после выбора — «ПРИНЯТЬ БОЙ · ИМЯ» */
   function renderLobbyAccept(list) {
     const btn = byId('btn-lobby-accept');
     if (!btn) return;
+    if (!list || !list.length) {
+      btn.classList.add('hidden');
+      btn.disabled = false;
+      btn.onclick = null;
+      return;
+    }
     const pick = lobbyPick && list.filter(function (r) { return r.code === lobbyPick; })[0];
-    btn.classList.toggle('hidden', !pick);
+    btn.classList.remove('hidden');
+    btn.disabled = !pick;
     if (pick) {
       btn.textContent = t('lobbyAccept') + ' · ' + String(pick.name || 'PLAYER').slice(0, 20);
       btn.onclick = function () {
-        if (busy || mode !== 'idle' || !lobbyPick) return;
+        if (busy || mode !== 'idle' || !lobbyPick || btn.disabled) return;
         const code = lobbyPick;
         lobbyPick = '';
         enterRoom(code, 'guest');
       };
+    } else {
+      btn.textContent = t('lobbyPickHint');
+      btn.onclick = null;
     }
   }
 
