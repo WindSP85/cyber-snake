@@ -372,6 +372,15 @@ async function tests() {
   ok(wB && wB.data.side === 1 && wB.data.s[0] === 0 && wB.data.s[1] === 2,
     'обоим одинаковый вердикт');
 
+  /* результат записал САМ СЕРВЕР — ровно один раз, без клиентских POST */
+  const pb = store.pvpPublic('DuelerB');
+  const pa = store.pvpPublic('DuelerA');
+  ok(pb && pb.wins === 1 && pb.losses === 0, 'сервер записал победу B один раз');
+  ok(pa && pa.wins === 0 && pa.losses === 1, 'сервер записал поражение A один раз');
+  ok(store.duels.filter(function (d) {
+    return d.winner === 'DuelerB' && d.loser === 'DuelerA';
+  }).length === 1, 'в истории дуэлей одна запись на матч');
+
   /* реванш: оба запросили → новый 'start' теми же сторонами */
   sendW(DA, { t: 'msg', type: 'rematch', data: null });
   await waitFor(DB, function (x) { return x.t === 'msg' && x.type === 'rematch'; }, 'реле rematch');

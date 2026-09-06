@@ -295,12 +295,50 @@ function startMsg(room, id) {
   };
 }
 
+/* результат матча пишет СЕРВЕР: он сам видел бой, счёт не накрутить
+   двумя клиентскими POST'ами (старая двойная запись) */
+const CAUSE_MAP = {
+  dEat: 'bite',
+  dTrapped: 'loop',
+  dHead: 'headon',
+  dCrash: 'crash'
+};
+
+function recordServerDuel(room, info, causes) {
+  try {
+    const side = info.side;
+    if (side !== 0 && side !== 1) return; // ничья — не матч
+    const names = [];
+    room.forEach(function (m) { names[room.sideOf[m.id]] = m.name; });
+    if (!names[side] || !names[1 - side]) return;
+    const wRounds = info.s[side] | 0;
+    const lRounds = info.s[1 - side] | 0;
+    store.addDuel({ winner: names[side], loser: names[1 - side], rounds: wRounds + ':' + lRounds });
+    store.addPvpResult({
+      winner: names[side],
+      loser: names[1 - side],
+      wRounds: wRounds,
+      lRounds: lRounds,
+      causes: (causes[side] || []).map(function (k) {
+        return CAUSE_MAP[k] || 'crash';
+      })
+    });
+  } catch (e) { /* запись не должна ронять живой матч */ }
+}
+
 /* новый матч: стороны закрепляются за текущими участниками,
    каждому уходит 'start' с его стороной и размером арены */
 function startRoomMatch(room) {
+  const causes = [[], []]; // способы побед стороны 0 и 1
   room.match = duelCore.createMatch({
-    onRound: function (info) { roomSend(room, 'round', info); },
-    onWin: function (info) { roomSend(room, 'win', info); }
+    onRound: function (info) {
+      if (info.w === 0 || info.w === 1) causes[info.w].push(info.k);
+      roomSend(room, 'round', info);
+    },
+    onWin: function (info) {
+      roomSend(room, 'win', info);
+      recordServerDuel(room, info, causes);
+    }
   });
   room.match.begin();
   room.snapAcc = 0;

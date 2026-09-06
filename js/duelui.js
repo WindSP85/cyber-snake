@@ -764,7 +764,9 @@
     if (CS.UI && typeof CS.UI.show === 'function') CS.UI.show('duelresult');
     recordDuel(r, mine); // feature T25: the local history ('aborted' skipped)
     renderStreakBadge(); // the lobby badge is ready for the next visit
-    reportDuelResult(r, sc); // SPEC §22: match history in the cloud
+    /* результат в облако пишет СЕРВЕР (он вёл матч) — здесь только
+       подтянуть свежий рейтинг/статусы для экрана боёв */
+    window.setTimeout(fetchPvpQuiet, 2500);
     /* ПВП-задания (SPEC §28): дейлик + недельный по итогам матча */
     if (r === 'win' || r === 'loss') {
       const myIdx2 = mode === 'host' ? 0 : 1;
@@ -779,40 +781,6 @@
           roundsWon: myWins
         });
       }
-    }
-  }
-
-  /* fire-and-forget duel result POST (only real win/loss matches);
-     ПВП-рейтингу нужны счёт по раундам и способы побед */
-  function reportDuelResult(r, sc) {
-    try {
-      if (r !== 'win' && r !== 'loss') return;
-      const cfg = window.CS && CS.Config;
-      if (!cfg || !cfg.apiBase) return;
-      const mine = (CS.Net && typeof CS.Net.myName === 'function' ? CS.Net.myName() : '') || 'PLAYER';
-      const foe = foeName || 'RIVAL';
-      const wRounds = r === 'win' ? (sc[0] | 0) : (sc[1] | 0);
-      const lRounds = r === 'win' ? (sc[1] | 0) : (sc[0] | 0);
-      const body = {
-        winner: r === 'win' ? mine : foe,
-        loser: r === 'win' ? foe : mine,
-        rounds: wRounds + ':' + lRounds,
-        wRounds: wRounds,
-        lRounds: lRounds,
-        causes: r === 'win' ? myCauses.slice() : foeCauses.slice()
-      };
-      const ctl = new AbortController();
-      const kill = setTimeout(function () { ctl.abort(); }, 5000);
-      fetch(cfg.apiBase.replace(/\/$/, '') + '/api/duel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: ctl.signal
-      }).catch(function () {}).then(function () { clearTimeout(kill); });
-      /* после отправки подтянем свежий рейтинг/статусы фоном */
-      window.setTimeout(fetchPvpQuiet, 2500);
-    } catch (e) {
-      /* the duel result screen must never depend on the network */
     }
   }
 
