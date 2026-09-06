@@ -6,6 +6,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 COPY server/server.js server/store.js server/bot.js ./
+COPY server/duel-core.js ./
 COPY server/ws ./ws
 
 # данные (scores/duels/pvp json) живут в volume; владелец — node,

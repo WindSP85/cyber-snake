@@ -23,6 +23,11 @@ const WebSocket = require('./ws');
 const WebSocketServer = WebSocket.WebSocketServer;
 const Store = require('./store');
 const bot = require('./bot');
+/* ядро дуэли: в контейнере лежит рядом (server/duel-core.js),
+   в репозитории — общее с браузером (js/duel-core.js) */
+const duelCore = (function () {
+  try { return require('./duel-core'); } catch (e) { return require('../js/duel-core'); }
+})();
 
 /* ---------- конфигурация из окружения ---------- */
 
@@ -266,6 +271,89 @@ function roomSnapshot(code) {
   return list;
 }
 
+/* ---------- серверные дуэли (SPEC §22: равные условия) ---------- */
+
+/* сообщение «от сервера» обоим игрокам комнаты: клиентский net.js
+   доставляет его в onMessage как обычнуюrelay-копию */
+function roomSend(room, type, data) {
+  const payload = {
+    t: 'msg', type: type,
+    data: data === undefined ? null : data,
+    from: '#server'
+  };
+  room.forEach(function (member) { sendObj(member.ws, payload); });
+}
+
+function startMsg(room, id) {
+  return {
+    t: 'msg', type: 'start', from: '#server',
+    data: {
+      side: room.sideOf[id],
+      gw: duelCore.GRID_W,
+      gh: duelCore.GRID_H
+    }
+  };
+}
+
+/* новый матч: стороны закрепляются за текущими участниками,
+   каждому уходит 'start' с его стороной и размером арены */
+function startRoomMatch(room) {
+  room.match = duelCore.createMatch({
+    onRound: function (info) { roomSend(room, 'round', info); },
+    onWin: function (info) { roomSend(room, 'win', info); }
+  });
+  room.match.begin();
+  room.snapAcc = 0;
+  room.ready = {};
+  room.forEach(function (m) { sendObj(m.ws, startMsg(room, m.id)); });
+}
+
+/* оба нажали ГОТОВ → старт (решение только за сервером) */
+function maybeStartMatch(room) {
+  if (!room.ready) return;
+  if (room.match && !room.match.done()) return;
+  if (room.size !== 2) return;
+  let both = true;
+  room.forEach(function (m) { if (!room.ready[m.id]) both = false; });
+  if (!both) return;
+  const ids = [];
+  room.forEach(function (m) { ids.push(m.id); });
+  room.sideOf = {};
+  room.sideOf[ids[0]] = 0; // первый в комнате (создатель) — сторона 0
+  room.sideOf[ids[1]] = 1;
+  room.rematch = {};
+  startRoomMatch(room);
+}
+
+/* оба запросили реванш после конца матча — новый бой теми же
+   сторонами (сообщения 'rematch' по-прежнему релеятся для UI) */
+function maybeRematch(room) {
+  const m = room.match;
+  if (!m || !m.done() || room.size !== 2) return;
+  let both = true;
+  room.forEach(function (mem) { if (!room.rematch[mem.id]) both = false; });
+  if (!both) return;
+  room.rematch = {};
+  startRoomMatch(room);
+}
+
+/* шаг серверной симуляции: все живые матчи разом, снапшот 16/с —
+   та же частота, что была у хоста в T27 */
+const SIM_STEP = 50;          // мс шага update()
+const SNAP_EVERY = 0.0625;    // с между снапшотами
+setInterval(function () {
+  rooms.forEach(function (room) {
+    const m = room.match;
+    if (!m || !m.started() || m.done()) return;
+    m.update(SIM_STEP / 1000);
+    room.snapAcc = (room.snapAcc || 0) + SIM_STEP / 1000;
+    if (room.snapAcc >= SNAP_EVERY || m.done()) {
+      room.snapAcc = 0;
+      roomSend(room, 'state', m.snapshot());
+    }
+  });
+}, SIM_STEP);
+
 function broadcastPresence(code) {
   const room = rooms.get(code);
   if (!room) return;
@@ -282,11 +370,23 @@ function leaveRoom(ws) {
   const room = rooms.get(code);
   if (!room) return;
   const member = room.get(ws._id);
-  if (member && member.ws === ws) room.delete(ws._id);
+  let removed = false;
+  if (member && member.ws === ws) {
+    room.delete(ws._id);
+    removed = true;
+  }
+  /* not removed = этот id уже переприсоединился новым сокетом:
+     состав не менялся — ничего не трогаем */
   if (room.size === 0) {
     rooms.delete(code);
     pushLobby(); // комната исчезла из списка ожидания
-  } else {
+  } else if (removed) {
+    if (room.ready) delete room.ready[ws._id];
+    if (room.rematch) delete room.rematch[ws._id];
+    if (room.match && !room.match.done()) {
+      room.match = null; // бой без одного игрока не крутится:
+                         // оставшийся получит presence-уход и abort
+    }
     broadcastPresence(code);
     pushLobby(); // снова один игрок — комната снова ждёт
   }
@@ -320,6 +420,11 @@ function handleJson(ws, msg) {
     if (!room) {
       room = new Map();
       room.createdOpen = open; // «открытая» комната попадает в лобби
+      room.ready = {};         // флаги ГОТОВ (сервер решает о старте)
+      room.rematch = {};       // флаги реванша
+      room.match = null;       // живой матч (симуляция на сервере)
+      room.sideOf = {};        // id → сторона 0|1 в матче
+      room.snapAcc = 0;        // накопитель между снапшотами
       rooms.set(code, room);
     }
     if (room.size >= MAX_ROOM_MEMBERS && !room.has(id)) {
@@ -335,6 +440,11 @@ function handleJson(ws, msg) {
     ws._id = id;
     room.set(id, { ws: ws, id: id, name: name });
     sendObj(ws, { t: 'joined', ok: true });
+    /* переподключение в живой матч: сразу обратно в бой */
+    if (room.match && !room.match.done() &&
+        (room.sideOf[id] === 0 || room.sideOf[id] === 1)) {
+      sendObj(ws, startMsg(room, id));
+    }
     broadcastPresence(code);
     pushLobby(); // комната набрала двоих → исчезла из ожидания
     return;
@@ -344,9 +454,32 @@ function handleJson(ws, msg) {
     if (!ws._room) return; // сначала join
     const type = String(msg.type || '');
     if (!type || type.length > 32) return;
-    const payload = { t: 'msg', type: type, data: msg.data === undefined ? null : msg.data, from: ws._id };
     const room = rooms.get(ws._room);
     if (!room) return;
+
+    /* серверная дуэль: пока матч жив, ходы кормят симулятор,
+       а клиентские 'state'/'round'/'win'/'start' больше не релеятся */
+    if (room.match && !room.match.done()) {
+      if (type === 'turn') {
+        const side = room.sideOf[ws._id];
+        if (side === 0 || side === 1) {
+          room.match.input(side, msg.data && msg.data.dir);
+        }
+        return;
+      }
+      if (type === 'state' || type === 'round' || type === 'win' || type === 'start') {
+        return;
+      }
+    }
+    if (type === 'ready' || type === 'unready') {
+      if (room.ready) room.ready[ws._id] = type === 'ready';
+      maybeStartMatch(room);
+      /* дальше обычное реле: соперник рисует бейдж ГОТОВ */
+    } else if (type === 'rematch') {
+      if (room.rematch) room.rematch[ws._id] = true;
+      maybeRematch(room);
+    }
+    const payload = { t: 'msg', type: type, data: msg.data === undefined ? null : msg.data, from: ws._id };
     room.forEach(function (member) {
       if (member.ws !== ws) sendObj(member.ws, payload); // broadcast self:false
     });

@@ -321,6 +321,79 @@ async function tests() {
   ok(r.json.me === null, 'нет карточки у неизвестного игрока');
   W.close();
 
+  /* ============ 5. Серверные дуэли ============ */
+  console.log('\n[5] Серверные дуэли (симуляция на сервере)');
+
+  const DA = await connect();
+  sendW(DA, { t: 'join', room: 'DUEL', id: 'duelaaaa', name: 'DuelerA' });
+  await waitFor(DA, function (x) { return x.t === 'joined'; }, 'join DA');
+  const DB = await connect();
+  sendW(DB, { t: 'join', room: 'DUEL', id: 'duelbbbb', name: 'DuelerB' });
+  await waitFor(DB, function (x) { return x.t === 'joined'; }, 'join DB');
+  await waitFor(DA, function (x) { return x.t === 'presence' && x.list.length === 2; }, 'presence: оба в комнате');
+
+  /* один готов — старта нет */
+  sendW(DA, { t: 'msg', type: 'ready', data: null });
+  m = await waitFor(DB, function (x) { return x.t === 'msg' && x.type === 'ready'; }, 'реле ready');
+  ok(m.from === 'duelaaaa', 'готовность релеится сопернику');
+  await new Promise(function (rs) { setTimeout(rs, 1100); });
+  ok(!DA._inbox.some(function (x) { return x.t === 'msg' && x.type === 'start'; }),
+    'старт ждёт готовности обоих');
+
+  /* оба готовы → 'start' обоим, стороны 0/1, серверная арена */
+  sendW(DB, { t: 'msg', type: 'ready', data: null });
+  const sA = await waitFor(DA, function (x) { return x.t === 'msg' && x.type === 'start'; }, 'start A', 5000);
+  const sB = await waitFor(DB, function (x) { return x.t === 'msg' && x.type === 'start'; }, 'start B', 5000);
+  ok(sA.data.side === 0 && sB.data.side === 1, 'стороны закреплены: создатель 0, вошедший 1');
+  ok(sA.data.gw === 36 && sA.data.gh === 30, 'арена серверная 36×30 у обоих');
+
+  /* снапшоты текут обоим игрокам */
+  m = await waitFor(DA, function (x) { return x.t === 'msg' && x.type === 'state'; }, 'state A', 5000);
+  ok(m.data.ph === 'countdown' || m.data.ph === 'fight', 'снапшот несёт фазу (' + m.data.ph + ')');
+  ok(Array.isArray(m.data.sn) && m.data.sn.length === 2, 'в снапшоте обе змейки');
+  await waitFor(DB, function (x) { return x.t === 'msg' && x.type === 'state'; }, 'state B', 5000);
+
+  /* ходы кормят симулятор и больше не релеются */
+  const spam = setInterval(function () {
+    sendW(DA, { t: 'msg', type: 'turn', data: { dir: 'up' } });
+  }, 600);
+  m = await waitFor(DA, function (x) { return x.t === 'msg' && x.type === 'round'; }, 'раунд 1', 15000);
+  eq(m.data.w, 1, 'раунд 1: сторона 1 победила (A ушёл в стену)');
+  ok(m.data.k === 'dCrash', 'причина раунда — краш');
+  ok(!DB._inbox.some(function (x) { return x.t === 'msg' && x.type === 'turn'; }),
+    'чужие ходы не релеются — истина в снапшотах');
+
+  /* матч до 2 побед: спам-повороты A приводят к 0:2 и 'win' */
+  m = await waitFor(DA, function (x) { return x.t === 'msg' && x.type === 'win'; }, 'конец матча', 25000);
+  clearInterval(spam);
+  eq(m.data.side, 1, 'матч: победа стороны 1');
+  eq(m.data.s, [0, 2], 'итоговый счёт 0:2');
+  const wB = DB._inbox.filter(function (x) { return x.t === 'msg' && x.type === 'win'; })[0];
+  ok(wB && wB.data.side === 1 && wB.data.s[0] === 0 && wB.data.s[1] === 2,
+    'обоим одинаковый вердикт');
+
+  /* реванш: оба запросили → новый 'start' теми же сторонами */
+  sendW(DA, { t: 'msg', type: 'rematch', data: null });
+  await waitFor(DB, function (x) { return x.t === 'msg' && x.type === 'rematch'; }, 'реле rematch');
+  sendW(DB, { t: 'msg', type: 'rematch', data: null });
+  const rA = await waitFor(DA, function (x) { return x.t === 'msg' && x.type === 'start'; }, 'реванш: start', 5000);
+  const rB = await waitFor(DB, function (x) { return x.t === 'msg' && x.type === 'start'; }, 'реванш: start B', 5000);
+  ok(rA.data.side === 0 && rB.data.side === 1, 'реванш: стороны сохранены');
+
+  /* выход из живого матча: бой умирает, соперник получает presence-уход */
+  sendW(DA, { t: 'msg', type: 'turn', data: { dir: 'up' } });
+  DA.close();
+  m = await waitFor(DB, function (x) { return x.t === 'presence' && x.list.length === 1; }, 'presence: A ушёл', 5000);
+  ok(m.list[0].id === 'duelbbbb', 'в комнате остался B');
+  await new Promise(function (rs) { setTimeout(rs, 400); });
+  const statesAfter = DB._inbox.filter(function (x) {
+    return x.t === 'msg' && x.type === 'state';
+  }).length;
+  await new Promise(function (rs) { setTimeout(rs, 800); });
+  ok(DB._inbox.filter(function (x) { return x.t === 'msg' && x.type === 'state'; }).length === statesAfter,
+    'симуляция остановлена после ухода игрока');
+  DB.close();
+
   /* ============ итог ============ */
   server.close();
   store.flush();

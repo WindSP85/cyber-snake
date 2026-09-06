@@ -8,7 +8,7 @@
    ============================================================ */
 'use strict';
 
-const VERSION = 'v15';
+const VERSION = 'v16';
 const CACHE = 'neon-snake-' + VERSION;
 const SHELL = [
   './',
@@ -29,6 +29,7 @@ const SHELL = [
   './js/upgrades.js',
   './js/daily.js',
   './js/quests.js',
+  './js/duel-core.js',
   './js/duel.js',
   './js/duelui.js',
   './js/ui.js',

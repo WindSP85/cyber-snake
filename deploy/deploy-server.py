@@ -16,8 +16,16 @@ except ImportError:
     sys.exit(1)
 
 REMOTE_DIR = '/opt/neon-snake'
-FILES = ['server/server.js', 'server/store.js', 'server/bot.js',
-         'docker-compose.vps.yml', 'Dockerfile']
+# (локальный путь, путь на сервере): ядро дуэли живёт в js/ для
+# браузера, а контейнеру нужно в server/
+FILES = [
+    ('server/server.js', 'server/server.js'),
+    ('server/store.js', 'server/store.js'),
+    ('server/bot.js', 'server/bot.js'),
+    ('js/duel-core.js', 'server/duel-core.js'),
+    ('docker-compose.vps.yml', 'docker-compose.vps.yml'),
+    ('Dockerfile', 'Dockerfile'),
+]
 
 
 def log(m):
@@ -52,8 +60,8 @@ def main():
 
     sftp = ssh.open_sftp()
     import posixpath
-    for f in FILES:
-        remote = REMOTE_DIR + '/' + f
+    for f, rel in FILES:
+        remote = REMOTE_DIR + '/' + rel
         rdir = posixpath.dirname(remote)
         parts = rdir.strip('/').split('/')
         cur = ''

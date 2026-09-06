@@ -673,7 +673,6 @@
     netSend(myReady ? 'ready' : 'unready', null);
     renderReadyUi();
     if (CS.TG && typeof CS.TG.haptic === 'function') CS.TG.haptic('click');
-    maybeAutoStart();
   }
 
   /* «ПОКИНУТЬ КОМНАТУ»: попрощаться и вернуться на дом-экран лобби */
@@ -700,22 +699,11 @@
   }
 
   /* старт срабатывает один раз: оба готовы и мы хост */
-  function maybeAutoStart() {
-    if (mode === 'host' && myReady && foeReady && !inMatch() && !started) {
-      startMatch();
-    }
-  }
-
   /* ---------- the match ---------- */
 
-  /* host only: a fresh seed per match (SPEC §22 start{seed}) */
-  function startMatch() {
-    const seed = Math.floor(Math.random() * 0x7fffffff);
-    netSend('start', { seed: seed });
-    beginMatch();
-  }
-
-  function beginMatch() {
+  /* старт матча приходит от СЕРВЕРА ('start' {side, gw, gh}): оба
+     игрока — рендереры снапшотов, симуляция живёт на сервере */
+  function beginMatch(startData) {
     started = true;
     ended = false;
     rematchMine = false;
@@ -732,10 +720,17 @@
     if (CS.Duel && typeof CS.Duel.setRivalName === 'function') {
       CS.Duel.setRivalName(foeName); // T27b: the label above the rival
     }
+    const side = startData && (startData.side === 0 || startData.side === 1)
+      ? startData.side
+      : (mode === 'host' ? 0 : 1);
+    const grid = startData && Number.isFinite(startData.gw) && Number.isFinite(startData.gh)
+      ? { w: startData.gw, h: startData.gh }
+      : null;
     const ok = CS.Game && typeof CS.Game.startDuel === 'function'
       ? CS.Game.startDuel({
-          host: mode === 'host',
-          myIndex: mode === 'host' ? 0 : 1,
+          host: false, // сервер считает бой: клиент только рисует
+          myIndex: side,
+          grid: grid,
           onMatchEnd: onMatchEnd
         })
       : false;
@@ -1007,7 +1002,7 @@
     rematchMine = true;
     netSend('rematch');
     waitRematchButton(); // «ждём соперника…» right on the pressed button
-    if (mode === 'host' && rematchFoe) startMatch();
+    /* новый матч начнёт сервер, когда оба попросят реванш */
   }
 
   /* ---------- presence / messages ---------- */
@@ -1063,7 +1058,8 @@
   function handleNetMessage(type, data) {
     if (mode === 'idle') return;
     if (type === 'start') {
-      if (mode === 'guest' && connected && !inMatch()) beginMatch();
+      /* сервер начал матч: обе стороны заходят рендерить */
+      if (connected && !inMatch()) beginMatch(data);
       return;
     }
     if (type === 'round') {
@@ -1085,19 +1081,18 @@
       return;
     }
     if (type === 'ready' || type === 'unready') {
-      /* SPEC §28: соперник переключил готовность */
+      /* SPEC §28: соперник переключил готовность; старт решает сервер */
       foeReady = type === 'ready';
       renderReadyUi();
       if (type === 'ready' && CS.TG && typeof CS.TG.haptic === 'function') {
         CS.TG.haptic('success');
       }
-      maybeAutoStart();
       return;
     }
     if (type === 'rematch') {
       if (ended && !foeGone) {
         rematchFoe = true;
-        if (mode === 'host' && rematchMine) startMatch();
+        /* перезапуск — за сервером: оба флага → новый 'start' */
       }
     }
     /* hello / bye / duel-internal types: presence is the source of truth */

@@ -1245,7 +1245,9 @@
       if (cfg && Number.isFinite(cfg.cell) && cfg.cell > 0) CELL = cfg.cell;
     },
 
-    /* {host:bool, myIndex:0|1, onMatchEnd(result,score)} */
+    /* {host:bool, myIndex:0|1, onMatchEnd(result,score), grid?:
+       {w,h} — серверная арена важнее локальной (SPEC: у обоих
+       игроков одинаковые размеры) } */
     begin: function (opts) {
       const o = opts || {};
       pred = null;       // T27: fresh prediction per match
@@ -1255,7 +1257,9 @@
       foeIndex = 1 - myIndex;
       onMatchEndCb = typeof o.onMatchEnd === 'function' ? o.onMatchEnd : null;
 
-      const grid = (cfg && typeof cfg.grid === 'function') ? cfg.grid() : null;
+      const grid = (o.grid && Number.isFinite(o.grid.w) && Number.isFinite(o.grid.h))
+        ? o.grid // сервер прислал арену: она одна на всех
+        : ((cfg && typeof cfg.grid === 'function') ? cfg.grid() : null);
       if (grid && Number.isFinite(grid.w) && Number.isFinite(grid.h)) {
         GW = Math.max(10, Math.min(60, Math.round(grid.w)));
         GH = Math.max(10, Math.min(60, Math.round(grid.h)));
