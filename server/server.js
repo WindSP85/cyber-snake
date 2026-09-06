@@ -201,7 +201,7 @@ const rooms = new Map();     // code → Map(id → {ws, name}); на самой
 const MAX_ROOM_MEMBERS = 2;  // 1×1: третий лишний
 const MAX_SOCKETS = 300;     // защита от исчерпания памяти
 const PING_EVERY = 15000;    // протокольный ping всем сокетам
-const LOBBY_MAX = 20;        // максимум строк в списке лобби
+const LOBBY_MAX = 50;        // максимум строк в списке лобби
 let sockets = 0;
 
 function sendObj(ws, obj) {
@@ -214,18 +214,18 @@ function sendObj(ws, obj) {
 
 /* список открытых комнат ожидания: [{code, name, rating, w, l, st}] —
    комната с одним игроком, созданная с флагом open; рейтинг/статусы
-   ждущего подтягиваются из ПВП-статистики (SPEC §28) */
+   ждущего подтягиваются из ПВП-статистики (SPEC §28);
+   сортировка по рейтингу: сильнейшие сверху, кап LOBBY_MAX */
 function lobbyList() {
-  const list = [];
+  const all = [];
   rooms.forEach(function (room, code) {
-    if (list.length >= LOBBY_MAX) return;
     if (!room.createdOpen || room.size !== 1) return;
     let name = 'PLAYER';
     room.forEach(function (m) { name = m.name; });
     name = String(name).slice(0, 20);
     const pub = store.pvpPublic(name);
     const st = pub ? pub.statuses : [];
-    list.push({
+    all.push({
       code: code,
       name: name,
       rating: pub ? pub.rating : 1000,
@@ -234,12 +234,23 @@ function lobbyList() {
       st: st.slice(-3) // три старших статуса для строки лобби
     });
   });
-  return list;
+  all.sort(function (a, b) { return (b.rating | 0) - (a.rating | 0); });
+  return all.slice(0, LOBBY_MAX);
+}
+
+/* сколько людей сейчас в лобби: наблюдатели списка + сами ждущие */
+function lobbyOnline(list) {
+  let watchers = 0;
+  wss.clients.forEach(function (ws) {
+    if (ws._lobby) watchers++;
+  });
+  return watchers + list.length;
 }
 
 /* разослать свежий список всем наблюдателям лобби */
 function pushLobby() {
-  const payload = { t: 'lobby', list: lobbyList() };
+  const list = lobbyList();
+  const payload = { t: 'lobby', list: list, online: lobbyOnline(list) };
   wss.clients.forEach(function (ws) {
     if (ws._lobby) sendObj(ws, payload);
   });
@@ -288,7 +299,8 @@ function handleJson(ws, msg) {
      открытых комнат при входе и после каждого изменения */
   if (msg.t === 'lobby') {
     ws._lobby = true;
-    sendObj(ws, { t: 'lobby', list: lobbyList() });
+    const list = lobbyList();
+    sendObj(ws, { t: 'lobby', list: list, online: lobbyOnline(list) });
     return;
   }
 

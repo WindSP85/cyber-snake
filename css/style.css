@@ -2567,6 +2567,16 @@ body.in-telegram .tg-only {
   margin-bottom: 2px;
 }
 
+/* «сейчас в лобби: N» — живой счётчик под заголовком */
+.lobby-online {
+  margin: -4px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
 /* ============================================================
    SPEC §28: ПВП-хаб («МОИ БОИ») — рейтинг, задания, топ, статусы
    ============================================================ */

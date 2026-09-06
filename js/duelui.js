@@ -71,6 +71,9 @@
   let pvpTimer = 0;         // ПВП: таймаут загрузки рейтинга
   let myReady = false;      // SPEC §28: «ГОТОВ К БОЮ» нажат мной
   let foeReady = false;     // соперник нажал «ГОТОВ К БОЮ»
+  let lastLobbyRows = [];   // последний список ждущих (для «БЫСТРЫЙ БОЙ»)
+  let lobbyOnlineCount = 0; // сколько людей сейчас в лобби
+  let foeWasHere = false;   // соперник уже появлялся (для тоста «нашёлся»)
 
   /* ---------- dom / i18n helpers ---------- */
 
@@ -320,8 +323,11 @@
   function startLobbyWatch() {
     if (!CS.Net || typeof CS.Net.watchLobby !== 'function') return;
     try {
-      CS.Net.watchLobby(function (list) {
+      CS.Net.watchLobby(function (list, online) {
         const rows = Array.isArray(list) ? list : [];
+        lastLobbyRows = rows;
+        lobbyOnlineCount = online | 0;
+        renderLobbyOnline();
         updateMenuLobbyCount(rows.length);
         if (mode !== 'idle') return; // в комнате таблица не нужна
         renderLobbyList(rows);
@@ -329,6 +335,27 @@
     } catch (e) {
       /* лобби — необязательная приятность: тихо */
     }
+  }
+
+  /* «сейчас в лобби: N» — живая строка под заголовком лобби */
+  function renderLobbyOnline() {
+    const el = byId('lobby-online');
+    if (!el) return;
+    el.textContent = lobbyOnlineCount >= 2 ? t('lobbyOnline', lobbyOnlineCount) : '';
+  }
+
+  /* «БЫСТРЫЙ БОЙ»: войти к первому ждущему (сильнейший по рейтингу —
+     он первым в списке), а если никто не ждёт — создать комнату */
+  function onQuick() {
+    if (busy || mode !== 'idle') return;
+    for (let i = 0; i < lastLobbyRows.length; i++) {
+      const code = String((lastLobbyRows[i] || {}).code || '').toUpperCase();
+      if (CODE_RE.test(code)) {
+        enterRoom(code, 'guest');
+        return;
+      }
+    }
+    onCreate();
   }
 
   function stopLobbyWatch() {
@@ -551,6 +578,7 @@
     foeCauses = [];
     myReady = false;
     foeReady = false;
+    foeWasHere = false;
     stopLobbyWatch(); // в комнате список ждущих не нужен
     setError(null);
     if (role === 'host') {
@@ -661,6 +689,14 @@
     connected = false;
     flow++;
     resetLobby();
+  }
+
+  /* «СОПЕРНИК В КОМНАТЕ!»: тост + перезвон + вибрация в момент,
+     когда ожидающий наконец дождался игрока */
+  function announceFoe() {
+    if (CS.UI && typeof CS.UI.toast === 'function') CS.UI.toast(t('duelFoeFound'));
+    if (CS.Audio && typeof CS.Audio.sfx === 'function') CS.Audio.sfx('bonus');
+    if (CS.TG && typeof CS.TG.haptic === 'function') CS.TG.haptic('success');
   }
 
   /* старт срабатывает один раз: оба готовы и мы хост */
@@ -886,7 +922,7 @@
       }
       if (fresh) {
         try { window.localStorage.setItem('cs_pvp_seen', JSON.stringify(seenStatuses)); } catch (e) { /* нет */ }
-        if (CS.Audio && typeof CS.Audio.sfx === 'function') CS.Audio.sfx('achieve');
+        if (CS.Audio && typeof CS.Audio.sfx === 'function') CS.Audio.sfx('bonus');
         if (CS.TG && typeof CS.TG.haptic === 'function') CS.TG.haptic('success');
       }
     } catch (e) {
@@ -1006,6 +1042,7 @@
         /* соперник ушёл до боя: его строка и флаг готовности гаснут */
         foeReady = false;
         foeName = '';
+        foeWasHere = false;
         renderReadyUi();
       }
       return;
@@ -1014,8 +1051,12 @@
        ГОТОВ, повторно сообщаю флаг новичку; старт — только по двум
        флагам (maybeAutoStart) */
     if (!inMatch() && !ended && connected && others >= 1) {
+      if (!foeWasHere) announceFoe(); // дождались: тост + перезвон
+      foeWasHere = true;
       renderReadyUi();
       if (myReady) netSend('ready', null); // переподключившемуся/новичку
+    } else if (others === 0) {
+      foeWasHere = false;
     }
   }
 
@@ -1202,6 +1243,7 @@
       }
     };
     bind('btn-duel', openLobby);
+    bind('btn-quick', onQuick); // «БЫСТРЫЙ БОЙ»: к первому ждущему
     bind('btn-duel-create', onCreate);
     bind('btn-duel-invite', onInvite);
     bind('btn-duel-copy', onCopy);

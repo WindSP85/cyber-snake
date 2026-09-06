@@ -429,7 +429,7 @@
           return;
         }
         if (msg && msg.t === 'lobby' && lobbyCb) {
-          lobbyCb(Array.isArray(msg.list) ? msg.list : []);
+          lobbyCb(Array.isArray(msg.list) ? msg.list : [], msg.online | 0);
         }
       };
       ws.onclose = function () {
