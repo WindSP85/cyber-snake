@@ -723,6 +723,7 @@
   }
 
   function startBoss(idx) {
+    hunters = []; // призраки не вмешиваются в бой с боссом
     bossBaseTps = Math.min(MAX_TPS, BASE_TPS + TPS_STEP * (level - 1));
     fight = new CS.BossFight(idx, GRID_W, GRID_H, bossEvents());
     state = 'boss';
@@ -845,6 +846,7 @@
   function finishGameOver() {
     state = 'gameover';
     arenaFx = null; // секрет арены не переживает забег
+    hunters = [];   // и охотники тоже
     fight = null;
     pendingBoss = 0;
     pickups = [];      // feature T8
@@ -1305,6 +1307,208 @@
     g.restore();
   }
 
+  /* ---------- SPEC §29: ОХОТНИКИ-ПРИЗРАКИ (пакман-стиль, соло) ----------
+     Рандомно материализуются (не ближе 6 клеток к голове, не на боссе),
+     0.8 с мигают безвредно, потом 5 с гоняются за хвостом. Укус — до 3
+     сегментов (−25/сегмент). Догнали ГОЛОВУ — съели целиком (смерть).
+     Голова настигла охотника — он съедобен: +100. Уважают секрет-арену. */
+  const HUNTER_LIFE = 5;
+  const HUNTER_WARM = 0.8;
+  const HUNTER_FADE = 0.4;
+  const HUNTER_TPS = 6.8;         // чуть медленнее базовой змейки
+  const HUNTER_BITE = 3;
+  const HUNTER_MIN_LEN = 3;
+  const HUNTER_SCORE = 100;
+  const HUNTER_MAX = 2;
+  const HUNTER_FIRST = 20;
+  const HUNTER_EVERY_MIN = 14;
+  const HUNTER_EVERY_MAX = 26;
+  const HUNTER_DIST = 6;
+  let hunters = [];               // {x,y,fx,fy,mt,t,phase}
+  let hunterTimer = HUNTER_FIRST;
+
+  function spawnHunter() {
+    const occ = occupiedKeys();
+    const head = snake.length ? snake[0].curr : null;
+    const free = [];
+    for (let y = 0; y < GRID_H; y++) {
+      for (let x = 0; x < GRID_W; x++) {
+        if (occ.has(key(x, y))) continue;
+        if (!arenaPlayableCell(x, y)) continue;
+        if (head && Math.abs(x - head.x) + Math.abs(y - head.y) < HUNTER_DIST) continue;
+        free.push({ x: x, y: y });
+      }
+    }
+    if (!free.length) return;
+    const c = free[Math.floor(Math.random() * free.length)];
+    hunters.push({ x: c.x, y: c.y, fx: c.x, fy: c.y, mt: 1, t: 0, phase: 'warm' });
+    CS.UI.toast(tr('ghostWarn'));
+    CS.Audio.sfx('warn');
+    CS.TG.haptic('warning');
+  }
+
+  /* жадный шаг к хвосту: сначала ось с большим остатком, стены/арена */
+  function hunterStep(h) {
+    const target = snake[snake.length - 1].curr;
+    const dx = target.x - h.x;
+    const dy = target.y - h.y;
+    const dirs = [];
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      if (dx !== 0) dirs.push([dx > 0 ? 1 : -1, 0]);
+      if (dy !== 0) dirs.push([0, dy > 0 ? 1 : -1]);
+    } else {
+      if (dy !== 0) dirs.push([0, dy > 0 ? 1 : -1]);
+      if (dx !== 0) dirs.push([dx > 0 ? 1 : -1, 0]);
+    }
+    for (let i = 0; i < dirs.length; i++) {
+      const nx = h.x + dirs[i][0];
+      const ny = h.y + dirs[i][1];
+      if (nx < 0 || nx >= GRID_W || ny < 0 || ny >= GRID_H) continue;
+      if (!arenaPlayableCell(nx, ny)) continue;
+      h.fx = h.x;
+      h.fy = h.y;
+      h.x = nx;
+      h.y = ny;
+      return;
+    }
+    h.fx = h.x; // зажат со всех сторон — топчется на месте
+    h.fy = h.y;
+  }
+
+  /* укус хвоста: до 3 сегментов, штраф как у ГЛОТА (−25/сегмент) */
+  function hunterBite() {
+    CS.Audio.sfx('gulp');
+    CS.FX.shake(5);
+    CS.TG.haptic('heavy');
+    const n = Math.min(HUNTER_BITE, snake.length - HUNTER_MIN_LEN);
+    for (let k = 0; k < n; k++) {
+      const tail = snake.pop();
+      CS.FX.burst(tail.curr.x * CELL + CELL / 2, tail.curr.y * CELL + CELL / 2, '#ff2d55', 8);
+      penalizeScore(25);
+    }
+  }
+
+  function updateHunters(dt) {
+    if (state !== 'playing') return;
+    if (hunterTimer > 0) hunterTimer -= dt;
+    if (hunterTimer <= 0) {
+      hunterTimer = HUNTER_EVERY_MIN + Math.random() * (HUNTER_EVERY_MAX - HUNTER_EVERY_MIN);
+      if (hunters.length < HUNTER_MAX && !(fight && fight.active)) spawnHunter();
+    }
+    if (!hunters.length || !snake.length) return;
+    const head = snake[0].curr;
+    for (let i = hunters.length - 1; i >= 0; i--) {
+      const h = hunters[i];
+      h.t += dt;
+      if (h.phase === 'warm' && h.t >= HUNTER_WARM) h.phase = 'hunt';
+      const lifeEnd = HUNTER_WARM + HUNTER_LIFE;
+      if (h.t >= lifeEnd) {
+        if (h.phase !== 'fade') {
+          h.phase = 'fade';
+          CS.FX.burst(h.x * CELL + CELL / 2, h.y * CELL + CELL / 2, '#3a5a6a', 6);
+        }
+        if (h.t >= lifeEnd + HUNTER_FADE) hunters.splice(i, 1);
+        continue;
+      }
+      if (h.phase !== 'hunt') continue;
+      h.mt += dt * HUNTER_TPS;
+      while (h.mt >= 1) {
+        h.mt -= 1;
+        hunterStep(h);
+        if (h.x === head.x && h.y === head.y) {
+          /* догнал голову — съел целиком (щит респавна спасает) */
+          if (invulnTimer <= 0) {
+            CS.UI.toast(tr('ghostEaten'));
+            die();
+            return;
+          }
+        } else if (invulnTimer <= 0 && snake.length > HUNTER_MIN_LEN) {
+          let bit = false;
+          for (let k = 2; k < snake.length; k++) {
+            if (snake[k].curr.x === h.x && snake[k].curr.y === h.y) {
+              bit = true;
+              break;
+            }
+          }
+          if (bit) {
+            hunterBite();       // наелся — доволен, растворяется
+            hunters.splice(i, 1);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  /* пакман-силуэт: купол + шевелящаяся юбка, глаза следят за головой,
+     пасть-клин чамкает в сторону добычи */
+  function drawHunters(g) {
+    for (let i = 0; i < hunters.length; i++) {
+      const h = hunters[i];
+      const mt = Math.min(1, h.mt);
+      const px = (h.fx + (h.x - h.fx) * mt) * CELL + CELL / 2;
+      const py = (h.fy + (h.y - h.fy) * mt) * CELL + CELL / 2;
+      const r = CELL * 0.48;
+      let alpha = 1;
+      if (h.phase === 'warm') {
+        alpha = 0.25 + 0.35 * (0.5 + 0.5 * Math.sin(animTime * 18));
+      } else if (h.phase === 'fade') {
+        alpha = Math.max(0, 1 - (h.t - HUNTER_WARM - HUNTER_LIFE) / HUNTER_FADE);
+      }
+      const head = snake.length ? snake[0].curr : null;
+      const ang = head
+        ? Math.atan2(head.y * CELL - py, head.x * CELL - px)
+        : 0;
+      const chomp = 0.5 + 0.5 * Math.sin(animTime * 11);
+      g.save();
+      g.globalAlpha = alpha;
+      if (CS.FX && typeof CS.FX.drawGlow === 'function') {
+        CS.FX.drawGlow(g, px, py, CELL * 2.2, CELL * 2.2, '#ff2d55', 12);
+      }
+      g.fillStyle = 'rgba(255,45,85,0.85)';
+      g.beginPath();
+      g.arc(px, py - r * 0.1, r, Math.PI, 0);
+      const wob = Math.sin(animTime * 9 + i * 2) * r * 0.12;
+      const bottom = py + r * 0.85;
+      g.lineTo(px + r, bottom - r * 0.3);
+      g.lineTo(px + r * 0.5, bottom + wob);
+      g.lineTo(px, bottom - r * 0.25);
+      g.lineTo(px - r * 0.5, bottom - wob);
+      g.lineTo(px - r, bottom - r * 0.3);
+      g.closePath();
+      g.fill();
+      /* пасть: тёмный клин, раствор анимируется */
+      const mAng = 0.12 + chomp * 0.55;
+      g.fillStyle = BG;
+      g.beginPath();
+      g.moveTo(px, py - r * 0.1);
+      g.arc(px, py - r * 0.1, r * 1.06, ang - mAng, ang + mAng);
+      g.closePath();
+      g.fill();
+      g.strokeStyle = '#ffe600';
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.arc(px, py - r * 0.1, r * 1.06, ang - mAng, ang + mAng);
+      g.stroke();
+      /* глаза с зрачками к голове */
+      const ex = Math.cos(ang), ey = Math.sin(ang);
+      const oxv = -ey * r * 0.42, oyv = ex * r * 0.42;
+      for (let e = -1; e <= 1; e += 2) {
+        g.fillStyle = '#ffffff';
+        g.beginPath();
+        g.arc(px + oxv * e + ex * r * 0.12, py - r * 0.28 + oyv * e + ey * r * 0.12,
+          r * 0.26, 0, Math.PI * 2);
+        g.fill();
+        g.fillStyle = BG;
+        g.beginPath();
+        g.arc(px + oxv * e + ex * r * 0.26, py - r * 0.28 + oyv * e + ey * r * 0.26,
+          r * 0.12, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.restore();
+    }
+  }
+
   function applyMystery(px, py, forced) {
     CS.Audio.sfx('mystery');
     CS.FX.flash('#ffffff', 0.15);
@@ -1581,6 +1785,19 @@
       });
     }
 
+    // SPEC §29: голова настигла охотника — он съедобен
+    for (let i = hunters.length - 1; i >= 0; i--) {
+      const h = hunters[i];
+      if (h.phase === 'hunt' && h.x === nx && h.y === ny) {
+        hunters.splice(i, 1);
+        addScore(HUNTER_SCORE);
+        CS.UI.toast(tr('ghostEat', HUNTER_SCORE));
+        CS.Audio.sfx('bonus');
+        CS.FX.burst(nx * CELL + CELL / 2, ny * CELL + CELL / 2, '#ff2d55', 16);
+        CS.TG.haptic('success');
+      }
+    }
+
     // normal food
     if (food && food.x === nx && food.y === ny) eatFoodAt(nx, ny);
 
@@ -1698,6 +1915,8 @@
     // feature T21: count the run; the tutorial window is the first
     // TUT_RUNS ones and every queued hint dies with the run
     bumpRuns();
+    hunters = [];        // SPEC §29: новый забег — охота с чистого листа
+    hunterTimer = HUNTER_FIRST;
     tutTimers = [];
     tutLifeShown = false;
     tutDangerShown = false;
@@ -2062,6 +2281,7 @@
       updateDebris(dt);    // feature T9
       updateEscaped(dt);   // feature T11
       updateBank(dt);      // feature T11
+      updateHunters(dt);   // SPEC §29: охотники-призраки
 
       if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
 
@@ -2160,6 +2380,7 @@
       drawBank();    // feature T11
       if (fight && fight.active) fight.draw(g, CELL); // draws its charges itself
       drawSnake();
+      drawHunters(g); // SPEC §29: охотники поверх змейки
     }
     if (arMask) {
       g.restore();
