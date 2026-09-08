@@ -40,7 +40,7 @@
   const CHARGE_SCORE = 25;
   const BOSS_EVERY = 3;             // every 3rd level
   const BOSS_SCORE = 250;           // x bossIndex
-  const INPUT_BUFFER = 2;             // 2 + axis-replacement = spam-proof responsiveness
+  const INPUT_BUFFER = 3;             // SPEC §2: очередь до 3 + axis-replacement
   const DIE_TIME = 1;               // death sequence length
   const BANNER_TIME = 2;            // boss warning banner on screen
   const DMG_POP_TIME = 0.9;         // "-1" hit marker over the boss, seconds
@@ -128,12 +128,13 @@
      'jackpot' while the life stock is full */
   const MYSTERY_EFFECTS = [
     { type: 'jackpot', weight: 15 },
-    { type: 'double', weight: 15 },
-    { type: 'turbo', weight: 12 },
+    { type: 'double', weight: 13 },
+    { type: 'turbo', weight: 11 },
     { type: 'life', weight: 8 },
-    { type: 'reverse', weight: 15 },
-    { type: 'split', weight: 15 },
-    { type: 'death', weight: 10 }
+    { type: 'reverse', weight: 13 },
+    { type: 'split', weight: 13 },
+    { type: 'death', weight: 10 },
+    { type: 'arena', weight: 12 } // SPEC §14: секрет арены (5 форм)
   ];
 
   const EFFECT_DUR = {
@@ -336,12 +337,29 @@
     g2.closePath();
   }
 
+  /* PERF: scratch переиспользуется — без аллокации массива объектов
+     каждый кадр (босс держит ссылку и читает свежие значения) */
+  const snakeScratch = [];
+
   function snakeCells() {
-    const cells = [];
     for (let i = 0; i < snake.length; i++) {
-      cells.push({ x: snake[i].curr.x, y: snake[i].curr.y });
+      if (i >= snakeScratch.length) snakeScratch.push({ x: 0, y: 0 });
+      snakeScratch[i].x = snake[i].curr.x;
+      snakeScratch[i].y = snake[i].curr.y;
     }
-    return cells;
+    snakeScratch.length = snake.length;
+    return snakeScratch;
+  }
+
+  /* SPEC §4: клетки, куда боссу заходить нельзя — еда/бонус/пикапы */
+  function bossAvoidKeys() {
+    const avoid = new Set();
+    if (food) avoid.add(key(food.x, food.y));
+    if (bonus) avoid.add(key(bonus.x, bonus.y));
+    for (let i = 0; i < pickups.length; i++) {
+      avoid.add(key(pickups[i].x, pickups[i].y));
+    }
+    return avoid.size ? avoid : null;
   }
 
   /* ---------- score ---------- */
@@ -583,8 +601,16 @@
 
   /* ---------- levels / speed ---------- */
 
+  let bossBaseTps = 0; // SPEC §3: база скорости, замороженная на время боя
+
   function applySpeed() {
-    let tps = Math.min(MAX_TPS, BASE_TPS + TPS_STEP * (level - 1));
+    /* SPEC §3 «на боссе скорость замораживается»: база фиксируется
+       на старте боя — вырослый за бой уровень не протекает через
+       эффекты-пикапы (раньше addEffect/updateEffects звали applySpeed
+       без проверки состояния и повышали тик на живом боссе) */
+    let tps = state === 'boss' && bossBaseTps > 0
+      ? bossBaseTps
+      : Math.min(MAX_TPS, BASE_TPS + TPS_STEP * (level - 1));
     // feature T8: surge and slow stack multiplicatively on top of the
     // level-based base (which stays frozen during a boss fight)
     if (hasEffect('surge')) tps *= SURGE_SPEED;
@@ -697,12 +723,15 @@
   }
 
   function startBoss(idx) {
+    bossBaseTps = Math.min(MAX_TPS, BASE_TPS + TPS_STEP * (level - 1));
     fight = new CS.BossFight(idx, GRID_W, GRID_H, bossEvents());
     state = 'boss';
     CS.Audio.music('boss');
     CS.UI.bossBar(fight.hp, fight.maxHp, true, fight.name);
     lastBossHp = fight.hp;
-    CS.UI.toast(tr('hintBoss')); // how to damage the boss — right when it matters
+    if (runs <= TUT_RUNS) {
+      CS.UI.toast(tr('hintBoss')); // SPEC §21: подсказка урона — окно обучения
+    }
     // feature T21: in the tutorial runs the white-flash warning
     // follows the boss hint (the only boss-specific danger cue)
     if (runs <= TUT_RUNS && !tutDangerShown) {
@@ -728,6 +757,7 @@
     bannerTimer = 0;
     fight = null;
     state = 'playing';
+    bossBaseTps = 0;
     applySpeed(); // the speed was frozen for the whole fight, catch up now
     CS.Audio.music('game');
     if (pendingBoss) {
@@ -814,6 +844,7 @@
 
   function finishGameOver() {
     state = 'gameover';
+    arenaFx = null; // секрет арены не переживает забег
     fight = null;
     pendingBoss = 0;
     pickups = [];      // feature T8
@@ -825,10 +856,8 @@
     invulnTimer = 0;
     applySpeed();      // drop surge/slow multipliers from stepInterval
     renderEffectsHud();
-    if (score > best) {
-      best = score;
-      saveBest();
-    }
+    /* best поддерживается addScore на каждом начислении — здесь
+     только финальный HUD (старая ветка синхронизации была мертва) */
     CS.UI.hud({ score: score, best: best });
     CS.UI.bossBar(0, 0, false);
     CS.UI.banner(null, false);
@@ -874,23 +903,144 @@
     if (box) box.classList.add('hidden');
   }
 
-  /* inside Telegram the account username becomes the default nickname */
-  function telegramName() {
+  /* ---------- идентичность игрока (SPEC §13) ---------- */
+
+  /* Telegram-пользователь целиком или null (вне Telegram) */
+  function tgUser() {
     try {
       const wa = window.Telegram && window.Telegram.WebApp;
-      const u = wa && wa.initDataUnsafe && wa.initDataUnsafe.user;
-      if (!u) return '';
-      return String(u.username || u.first_name || '').trim().slice(0, 20);
+      return (wa && wa.initDataUnsafe && wa.initDataUnsafe.user) || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /* привязка выбранного ника к Telegram-айди: переживает закрытие
+     игры — завтра того же игрока узнаём без вопросов */
+  function loadTgId() {
+    try {
+      return window.localStorage.getItem('cs_tg_id') || '';
     } catch (e) {
       return '';
     }
   }
 
-  /* a qualifying score reveals the name input with the last used name
-     (fallback: the Telegram account name) */
+  function saveTgId(id) {
+    try {
+      window.localStorage.setItem('cs_tg_id', String(id));
+    } catch (e) {
+      /* storage unavailable: спросим ник в следующий раз */
+    }
+  }
+
+  /* канонический ник: TG-ник → имя, привязанное к этому айди →
+     ключ «id…» (аварийный, пока не спросили) → сохранённое имя */
+  function playerNick() {
+    const u = tgUser();
+    if (u) {
+      const nick = String(u.username || '').trim().slice(0, 20);
+      if (nick) return nick;
+      const id = Number(u.id);
+      const idKey = Number.isFinite(id) && id > 0 ? String(id) : '';
+      if (idKey) {
+        if (loadTgId() === idKey && loadPlayerName()) return loadPlayerName();
+        return 'id' + idKey;
+      }
+    }
+    return loadPlayerName();
+  }
+
+  /* вход: TG-ник подхватываем молча; без ника — ОДИН раз спрашиваем
+     «ваш ник в игре» и привязываем выбор к айди навсегда */
+  function initPlayerIdentity() {
+    const u = tgUser();
+    if (!u) return; // обычный браузер: имя спросит лидерборд (один раз)
+    const nick = String(u.username || '').trim().slice(0, 20);
+    const id = Number(u.id);
+    const idKey = Number.isFinite(id) && id > 0 ? String(id) : '';
+    if (nick) {
+      savePlayerName(nick);
+      if (idKey) saveTgId(idKey);
+      return;
+    }
+    if (!idKey) return;
+    if (loadTgId() === idKey && loadPlayerName()) return; // уже спрошено
+    showNickDialog(String(u.first_name || '').trim().slice(0, 20), idKey);
+  }
+
+  /* SPEC §13: приветствие места в мировом топе-100 — раз за сессию */
+  let rankAnnounced = false;
+
+  function announceRank() {
+    if (rankAnnounced) return;
+    if (!CS.Leaderboard || typeof CS.Leaderboard.myRank !== 'function' ||
+        typeof CS.Leaderboard.isGlobal !== 'function' || !CS.Leaderboard.isGlobal()) return;
+    const nick = playerNick();
+    if (!nick) return;
+    CS.Leaderboard.myRank(nick, function (rank) {
+      if (rankAnnounced || !rank) return;
+      rankAnnounced = true;
+      if (rank === 1) {
+        CS.UI.toast(tr('rankLeader'));
+        CS.Audio.sfx('ach');
+        CS.FX.flash('#ffe600', 0.2);
+      } else {
+        CS.UI.toast(tr('rankMine', rank));
+      }
+    });
+  }
+
+  let nickPending = null; // {first, idKey}: диалог открыт
+
+  function showNickDialog(first, idKey) {
+    const dlg = document.getElementById('nick-dialog');
+    const input = document.getElementById('nick-input');
+    if (!dlg || !input) {
+      saveTgId(idKey); // DOM не нашёлся: авто-ник «id…», не зависаем
+      return;
+    }
+    nickPending = { first: first, idKey: idKey };
+    input.value = first;
+    dlg.classList.remove('hidden');
+    if (typeof input.focus === 'function') input.focus();
+  }
+
+  function confirmNick() {
+    if (!nickPending) return;
+    const p = nickPending;
+    nickPending = null;
+    const input = document.getElementById('nick-input');
+    const typed = input ? String(input.value || '').trim().slice(0, 20) : '';
+    /* пусто — не тупим: имя из профиля, иначе ключ айди */
+    const nm = typed || p.first || ('id' + p.idKey);
+    savePlayerName(nm);
+    saveTgId(p.idKey);
+    const dlg = document.getElementById('nick-dialog');
+    if (dlg) dlg.classList.add('hidden');
+  }
+
+  function wireNickDialog() {
+    const ok = document.getElementById('nick-ok');
+    const input = document.getElementById('nick-input');
+    if (!ok || !input) return;
+    ok.addEventListener('click', confirmNick);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.code === 'Enter') confirmNick();
+    });
+  }
+
+  /* автозапись статистики: игрок опознан (Telegram ник/айди или имя,
+     введённое когда-то один раз) — результат сохраняется сам, без
+     ввода имени и без кнопки. Инпут показывается ровно один раз в
+     жизни — пока никакого имени не известно */
   function offerScoreSave() {
     const box = document.getElementById('score-save');
     if (!box) return;
+    const auto = playerNick();
+    if (auto) {
+      autoRecord(auto);
+      return;
+    }
     const ok = CS.Leaderboard &&
       typeof CS.Leaderboard.qualifies === 'function' &&
       CS.Leaderboard.qualifies(score);
@@ -899,9 +1049,25 @@
       return;
     }
     const input = document.getElementById('player-name');
-    if (input) input.value = loadPlayerName() || telegramName();
+    if (input) input.value = '';
     box.classList.remove('hidden');
     if (input && typeof input.focus === 'function') input.focus();
+  }
+
+  /* тихая запись: имя запоминаем навсегда; в таблице у игрока одна
+     строка — его лучший результат (ухудшение её не трогает) */
+  function autoRecord(name) {
+    savePlayerName(name);
+    if (score > 0 && CS.Leaderboard && typeof CS.Leaderboard.submit === 'function') {
+      const saved = CS.Leaderboard.submit(
+        { name: name, score: score, level: level },
+        function () {
+          /* POST сохранён на сервере: доска уже с новой строкой */
+          if (CS.UI && typeof CS.UI.renderBoard === 'function') CS.UI.renderBoard();
+        }
+      );
+      if (saved) CS.UI.toast(tr('autoSaved'));
+    }
   }
 
   /* "Save" button / Enter in the name field: submit, then show the board */
@@ -909,7 +1075,11 @@
     const input = document.getElementById('player-name');
     const name = input ? String(input.value || '').trim() : '';
     if (name && CS.Leaderboard && typeof CS.Leaderboard.submit === 'function') {
-      if (CS.Leaderboard.submit({ name: name, score: score, level: level })) {
+      if (CS.Leaderboard.submit({ name: name, score: score, level: level }, function () {
+        /* POST сохранён на сервере: перерисовать топ уже с новой
+           строкой (первый рендер мог обогнать персистенцию) */
+        if (CS.UI && typeof CS.UI.renderBoard === 'function') CS.UI.renderBoard();
+      })) {
         savePlayerName(name);
       }
     }
@@ -1003,6 +1173,138 @@
     return type;
   }
 
+  /* ---------- SPEC §14: СЕКРЕТ АРЕНЫ (из тайны «?») ----------
+     6 секунд поле плавно превращается в одну из форм и так же плавно
+     возвращается в прямоугольник. Смертельна только клетка, в которую
+     ГОЛОВА пытается войти (тело/еда вне маски просто гаснут визуально).
+     На бою с боссом секрет перебрасывается на другой эффект. */
+  const ARENA_KINDS = ['circle', 'diamond', 'cross', 'maze', 'pulse'];
+  const ARENA_DUR = 6;           // секунд
+  let arenaFx = null;            // {kind, t0}
+
+  function arenaEnvelope(t) {
+    const IN = 0.7, OUT = 1.0;   // плавный вход/выход, секунды
+    if (t <= 0) return 0;
+    if (t < IN) return t / IN;
+    if (t < ARENA_DUR - OUT) return 1;
+    return Math.max(0, (ARENA_DUR - t) / OUT);
+  }
+
+  function arenaState() {
+    if (!arenaFx) return null;
+    const t = (Date.now() - arenaFx.t0) / 1000;
+    if (t >= ARENA_DUR) {
+      arenaFx = null; // срок вышел: арена снова прямоугольник
+      return null;
+    }
+    return { kind: arenaFx.kind, t: t, k: arenaEnvelope(t) };
+  }
+
+  /* играбельна ли клетка (логика): центры клеток против маски */
+  function arenaPlayableCell(x, y) {
+    const a = arenaState();
+    if (!a || a.k <= 0) return true;
+    const px = x + 0.5, py = y + 0.5;
+    const cx = GRID_W / 2, cy = GRID_H / 2;
+    if (a.kind === 'circle') {
+      const rFull = Math.sqrt(cx * cx + cy * cy);
+      const r = rFull - (rFull - Math.max(cx, cy) * 0.72) * a.k;
+      const dx = px - cx, dy = py - cy;
+      return dx * dx + dy * dy <= r * r;
+    }
+    if (a.kind === 'diamond') {
+      const ax = cx - (cx - cx * 0.55) * a.k;
+      const ay = cy - (cy - cy * 0.55) * a.k;
+      return Math.abs(px - cx) / ax + Math.abs(py - cy) / ay <= 1;
+    }
+    if (a.kind === 'cross') {
+      const hx = cx - (cx - GRID_W * 0.14) * a.k;
+      const hy = cy - (cy - GRID_H * 0.17) * a.k;
+      return Math.abs(py - cy) <= hy || Math.abs(px - cx) <= hx;
+    }
+    if (a.kind === 'maze') {
+      if (a.k < 0.85) return true; // стены проявляются и тают
+      const band = Math.floor(x / 6);
+      const mx = x % 6;
+      if (mx !== 2 && mx !== 3) return true; // гребёнка: стены-колонны
+      const gap = band % 2 === 0 ? 2 : GRID_H - 3; // проходы чередуются
+      return y >= gap - 1 && y <= gap + 1;
+    }
+    if (a.kind === 'pulse') { // сжатие → разжатие до исходного
+      const m = Math.min(GRID_W, GRID_H) * 0.16 * Math.sin(Math.min(1, a.t / ARENA_DUR) * Math.PI);
+      return px > m && px < GRID_W - m && py > m && py < GRID_H - m;
+    }
+    return true;
+  }
+
+  /* контур маски в пикселях (для клипа/обводки); null = без маски.
+     Математика 1:1 с arenaPlayableCell — граница совпадает с логикой */
+  function arenaPath(g) {
+    const a = arenaState();
+    if (!a || a.k <= 0.01 || a.kind === 'maze') return null;
+    const W = GRID_W * CELL, H = GRID_H * CELL;
+    const cx = W / 2, cy = H / 2;
+    const ccx = GRID_W / 2, ccy = GRID_H / 2;
+    g.beginPath();
+    if (a.kind === 'circle') {
+      const rFull = Math.sqrt(ccx * ccx + ccy * ccy);
+      const r = (rFull - (rFull - Math.max(ccx, ccy) * 0.72) * a.k) * CELL;
+      g.arc(cx, cy, Math.max(1, r), 0, Math.PI * 2);
+    } else if (a.kind === 'diamond') {
+      const ax = (ccx - (ccx - ccx * 0.55) * a.k) * CELL;
+      const ay = (ccy - (ccy - ccy * 0.55) * a.k) * CELL;
+      g.moveTo(cx, cy - ay);
+      g.lineTo(cx + ax, cy);
+      g.lineTo(cx, cy + ay);
+      g.lineTo(cx - ax, cy);
+      g.closePath();
+    } else if (a.kind === 'cross') {
+      const hx = (ccx - (ccx - GRID_W * 0.14) * a.k) * CELL;
+      const hy = (ccy - (ccy - GRID_H * 0.17) * a.k) * CELL;
+      g.rect(0, cy - hy, W, hy * 2); // горизонтальное плечо
+      g.rect(cx - hx, 0, hx * 2, H); // вертикальное: union в одном path
+    } else if (a.kind === 'pulse') {
+      const m = Math.min(GRID_W, GRID_H) * 0.16 *
+        Math.sin(Math.min(1, a.t / ARENA_DUR) * Math.PI) * CELL;
+      g.rect(m, m, W - m * 2, H - m * 2);
+    } else {
+      return null;
+    }
+    return a;
+  }
+
+  /* неоновая граница текущей формы арены */
+  function arenaStroke(g) {
+    if (!arenaPath(g)) return;
+    g.save();
+    g.strokeStyle = '#00f0ff';
+    g.lineWidth = 2;
+    g.shadowColor = '#00f0ff';
+    g.shadowBlur = 14;
+    g.stroke();
+    g.restore();
+  }
+
+  /* лабиринт: стены-колонны проявляются/тают вместе с k */
+  function drawArenaWalls(g) {
+    const a = arenaState();
+    if (!a || a.kind !== 'maze' || a.k <= 0.02) return;
+    g.save();
+    g.globalAlpha = Math.min(1, a.k);
+    g.fillStyle = 'rgba(255, 45, 85, 0.5)';
+    for (let x = 0; x < GRID_W; x++) {
+      const mx = x % 6;
+      if (mx !== 2 && mx !== 3) continue;
+      const band = Math.floor(x / 6);
+      const gap = band % 2 === 0 ? 2 : GRID_H - 3;
+      for (let y = 0; y < GRID_H; y++) {
+        if (y >= gap - 1 && y <= gap + 1) continue; // проход насквозь
+        g.fillRect(x * CELL + 1, y * CELL + 1, CELL - 2, CELL - 2);
+      }
+    }
+    g.restore();
+  }
+
   function applyMystery(px, py, forced) {
     CS.Audio.sfx('mystery');
     CS.FX.flash('#ffffff', 0.15);
@@ -1027,6 +1329,20 @@
       CS.FX.burst(px, py, '#ff2d55', 14);
       CS.Audio.sfx('life');
       CS.UI.toast(tr('mLifeRe'));
+    } else if (kind === 'arena') {
+      /* секрет арены: на бою с боссом не катит — перебрасываем кубик */
+      if (fight && fight.active) {
+        applyMystery(px, py, 'double');
+        return;
+      }
+      arenaFx = {
+        kind: ARENA_KINDS[Math.floor(Math.random() * ARENA_KINDS.length)],
+        t0: Date.now()
+      };
+      CS.UI.toast(tr('pArena'));
+      CS.Audio.sfx('warn');
+      CS.FX.flash('#00f0ff', 0.2);
+      CS.FX.shake(4);
     } else if (kind === 'reverse') {
       addEffect('reverse');
       CS.Audio.sfx('reverse');
@@ -1073,7 +1389,8 @@
     for (let k = 0; k < DIRS4.length; k++) {
       const nx = cell.x + DIRS4[k].x;
       const ny = cell.y + DIRS4[k].y;
-      if (nx < 0 || nx >= GRID_W || ny < 0 || ny >= GRID_H) continue;
+      if (nx < 0 || nx >= GRID_W || ny < 0 || ny >= GRID_H ||
+          !arenaPlayableCell(nx, ny)) continue;
       if (!occ.has(key(nx, ny))) return { x: nx, y: ny, t: ESCAPED_LIFE };
     }
     return null;
@@ -1100,7 +1417,8 @@
       for (let k = 0; k < DIRS4.length; k++) {
         const nx = c.x + DIRS4[k].x;
         const ny = c.y + DIRS4[k].y;
-        if (nx < 0 || nx >= GRID_W || ny < 0 || ny >= GRID_H) continue;
+        if (nx < 0 || nx >= GRID_W || ny < 0 || ny >= GRID_H ||
+          !arenaPlayableCell(nx, ny)) continue;
         if (blocked.has(key(nx, ny))) continue;
         const nd = manhattan({ x: nx, y: ny }, head);
         if (nd > bestDist) {
@@ -1211,8 +1529,9 @@
     const nx = head.curr.x + dir.x;
     const ny = head.curr.y + dir.y;
 
-    // walls
-    if (nx < 0 || nx >= GRID_W || ny < 0 || ny >= GRID_H) {
+    // стены: границы поля + секрет-арена (SPEC §14)
+    if (nx < 0 || nx >= GRID_W || ny < 0 || ny >= GRID_H ||
+        !arenaPlayableCell(nx, ny)) {
       die();
       return;
     }
@@ -1279,6 +1598,11 @@
 
     // feature T11: a mystery death emptied the snake — nothing left to do
     if (!snake.length) return;
+
+    // audit: пикап мог убить (mystery-смерть → state='dying') — шаг
+    // обязан остановиться: дальше магнит/ядра/хранилище способны
+    // выбить состояние из dying, и game over никогда не наступит
+    if (state !== 'playing' && state !== 'boss') return;
 
     // feature T11: the head catching an escaped core
     for (let i = escaped.length - 1; i >= 0; i--) {
@@ -1377,8 +1701,9 @@
     tutTimers = [];
     tutLifeShown = false;
     tutDangerShown = false;
-    if (runs === 1) {
-      // the very first run opens with the controls + food hints
+    if (runs <= TUT_RUNS) {
+      // SPEC §21: подсказки управления/еды — в каждом из первых двух
+      // забегов (раньше — только в самом первом)
       queueTut(tr(IS_TOUCH ? 'tutMoveTouch' : 'tutMove'), TUT_MOVE_DELAY);
       queueTut(tr('tutFood'), TUT_MOVE_DELAY + TUT_FOOD_DELAY);
     }
@@ -1743,14 +2068,14 @@
       // feature T8: reboot pause — the world (and a live boss fight)
       // keeps running, the snake comes back afterwards
       if (state === 'respawning') {
-        if (fight && fight.active) fight.update(dt, snakeCells());
+        if (fight && fight.active) fight.update(dt, snakeCells(), bossAvoidKeys());
         respawnTimer -= dt;
         if (respawnTimer <= 0) finishRespawn();
         return;
       }
 
       if (state === 'boss' && fight && fight.active) {
-        fight.update(dt, snakeCells());
+        fight.update(dt, snakeCells(), bossAvoidKeys());
         if (fight && fight.hp !== lastBossHp) {
           lastBossHp = fight.hp;
           CS.UI.bossBar(fight.hp, fight.maxHp, true, fight.name);
@@ -1817,6 +2142,13 @@
 
     g.fillStyle = BG;
     g.fillRect(0, 0, W, H);
+    /* SPEC §14: секрет арены — сцена рисуется внутри маски, снаружи
+     остаётся пустота; лабиринт рисуется стенами поверх (без клипа) */
+    const arMask = arenaPath(g);
+    if (arMask) {
+      g.save();
+      g.clip();
+    }
     drawGrid();
 
     if (state !== 'menu') {
@@ -1829,11 +2161,20 @@
       if (fight && fight.active) fight.draw(g, CELL); // draws its charges itself
       drawSnake();
     }
+    if (arMask) {
+      g.restore();
+      arenaStroke(g);
+    }
+    drawArenaWalls(g);
     drawDarkMask(); // feature T20: the 'dark' vignette over the scene
     drawDanger(g); // batch3: wall-danger breathing
     CS.FX.draw(g);
     drawDmgPops();
   }
+
+  let darkGrad = null; // кэш маски «ТЕМНОТЫ» (квант по полклетки)
+  let darkGradX = -1;
+  let darkGradY = -1;
 
   /* feature T20: the daily 'dark' modifier — a radial mask centered
      on the interpolated head: fully transparent within DAILY_DARK_R0
@@ -1848,14 +2189,23 @@
       : 1; // dying / gameover: freeze at the current cells
     const hx = (head.prev.x + (head.curr.x - head.prev.x) * t) * CELL + CELL / 2;
     const hy = (head.prev.y + (head.curr.y - head.prev.y) * t) * CELL + CELL / 2;
-    const grad = g.createRadialGradient(
-      hx, hy, DAILY_DARK_R0 * CELL,
-      hx, hy, DAILY_DARK_R1 * CELL
-    );
-    grad.addColorStop(0, 'rgba(4,5,12,0)');
-    grad.addColorStop(1, 'rgba(4,5,12,0.96)');
+    /* PERF: огромный мягкий радиальный градиент почти не зависит от
+       точного центра — квантуем позицию до полклетки и кэшируем
+       (раньше createRadialGradient+2 стопа выполнялись каждый кадр) */
+    const qx = Math.round(hx / (CELL / 2)) * (CELL / 2);
+    const qy = Math.round(hy / (CELL / 2)) * (CELL / 2);
+    if (!darkGrad || darkGradX !== qx || darkGradY !== qy) {
+      darkGrad = g.createRadialGradient(
+        qx, qy, DAILY_DARK_R0 * CELL,
+        qx, qy, DAILY_DARK_R1 * CELL
+      );
+      darkGrad.addColorStop(0, 'rgba(4,5,12,0)');
+      darkGrad.addColorStop(1, 'rgba(4,5,12,0.96)');
+      darkGradX = qx;
+      darkGradY = qy;
+    }
     g.save();
-    g.fillStyle = grad;
+    g.fillStyle = darkGrad;
     g.fillRect(0, 0, GRID_W * CELL, GRID_H * CELL);
     g.restore();
   }
@@ -2308,9 +2658,11 @@
       g.globalAlpha = skinAlpha; // feature T17: the ghost skin
     }
     if (isHead) {
-      // feature T17: the head glow follows the active skin (rainbow flows)
-      g.shadowColor = CS.Skins.headGlow(animTime);
-      g.shadowBlur = 16;
+      // feature T17: the head glow follows the active skin (rainbow
+      // flows). PERF: печённый LRU-спрайт вместо shadowBlur в горячем
+      // цикле (радуга квантуется в skins.js — кэш не греется)
+      CS.FX.drawGlow(g, x + CELL / 2, y + CELL / 2, CELL * 2.6, CELL * 2.6,
+        CS.Skins.headGlow(animTime), 16);
     }
     roundRect(g, x + pad, y + pad, CELL - pad * 2, CELL - pad * 2, isHead ? 8 : 6);
     g.fill();
@@ -2477,6 +2829,12 @@
     // feature T15: Telegram Mini App bootstrap (ready + expand + the
     // 'in-telegram' body tag) lives in CS.TG; outside Telegram no-op
     CS.TG.init();
+
+    // SPEC §13: опознать игрока (TG-ник молча; id-only → один раз
+    // спросить ник и привязать к айди) — до первого забега
+    wireNickDialog();
+    initPlayerIdentity();
+    announceRank(); // и сразу: «ты лидер рейтинга» / «твоё место N»
 
     canvas = document.getElementById('game-canvas');
     if (canvas) {

@@ -19,6 +19,15 @@
 
    Сетка одна на всех: сервер задаёт GRID_W×GRID_H в 'start',
    оба клиента рендерят идентичную арену.
+
+   НЕТКОД v2 (мировые стандарты быстрых сетевых игр):
+   - входы не теряются: буфер поворотов FIFO глубиной 3 (как соло);
+   - каждый вход клиента нумеруется (seq) и подтверждается в снапшоте
+     (sq) — клиент знает, какие входы уже вшиты в авторитарное состояние;
+   - снапшот несёт номер тика tk и серверное время st: клиент строит
+     предсказание «вперёд» от авторитарного состояния и реплеит только
+     неподтверждённые входы (rewind & replay), а соперника рисует по
+     интерполяции снапшотов на отложенном таймлайне (jitter buffer).
    ============================================================ */
 (function () {
   'use strict';
@@ -29,7 +38,11 @@
   var START_LEN = 5;            // длина змейки на старте раунда
   var START_X0 = 0.15;          // противоположные трети арены
   var START_X1 = 0.85;
-  var TURN_BUFFER = 1;          // один буферизованный поворот
+  var TURN_BUFFER = 3;          // буфер поворотов: как в соло (SPEC §2) —
+                                // два быстрых «уголка» между тиками НЕ
+                                // теряются (раньше буфер был 1 и второй
+                                // поворот молча затирал первый → вечное
+                                // расхождение с предсказанием клиента)
   var COUNTDOWN_TIME = 3;       // фаза 3-2-1, с
   var ROUNDEND_TIME = 2.5;      // баннер итога раунда, с
   var MATCH_WINS = 2;           // до 2 побед
@@ -44,6 +57,16 @@
   var TRAP_MARGIN = 5;          // достижимо < длина + 5 -> западня
   var TRAP_SLOWMO = 1;          // длительность слоу-мо, с
   var TRAP_SLOW_FACTOR = 0.2;   // скорость симуляции в слоу-мо
+  /* СЕКРЕТ АРЕНЫ (SPEC §14/§22): в дуэли только круг и пульс.
+     Маска — функция НОМЕРА ТИКА: клиент предсказывает её точно
+     (нет расхождений со временем). Первый секрет — не раньше
+     ARENA_FIRST_TICK, дальше — случайно раз в 16-28 с. */
+  var ARENA_FIRST_TICK = 95;    // ~10 с боя (тесты живут меньше)
+  var ARENA_GAP_MIN = 150;      // ~16 с между секретами
+  var ARENA_GAP_MAX = 266;      // ~28 с
+  var ARENA_DUR_TICKS = 57;     // 6 с длительность
+  var ARENA_IN_TICKS = 16;      // ~1.7 с плавный вход (успеть уйти из угла)
+  var ARENA_OUT_TICKS = 10;     // ~1 с плавный выход к прямоугольнику
 
   var GRID_W = 36;              // арена серверной дуэли: клетки
   var GRID_H = 30;              // (одинакова у обоих игроков)
@@ -115,6 +138,21 @@
     var banner = null;
     var events = { bite: 0, trap: 0, eat: 0, round: 0 };
 
+    /* НЕТКОД v2: детерминизм и подтверждения (мировой стандарт
+       «sequenced inputs + ack + tick-stamped snapshots»):
+       - tickN    — номер тика боя (монотонный внутри раунда);
+       - pending  — повороты стороны, ждущие своего тика (FIFO до 3,
+                    как буфер ввода соло-игры SPEC §2);
+       - seqAck   — последний seq входа стороны, ПОЛНОСТЬЮ вошедший
+                    в симуляцию (клиент знает, что можно не реплеить);
+       - seqAuto  — монотонный fallback для старых клиентов без seq. */
+    var tickN = 0;
+    var pending = [[], []];
+    var seqAck = [0, 0];
+    var seqAuto = [0, 0];
+    var arena = null;      // {k:'circle'|'pulse', s, e} — тики
+    var arenaNext = ARENA_FIRST_TICK;
+
     /* флуд-филл: типизированные буферы, одно выделение на матч */
     var blocked = new Uint8Array(GW * GH);
     var seen = new Int32Array(GW * GH);
@@ -133,20 +171,40 @@
       return { segs: segs, dir: dir, queue: [], growth: 0, pass: 0 };
     }
 
-    function queueTurn(s, d) {
-      var last = s.queue.length ? s.queue[s.queue.length - 1] : s.dir;
-      if (d.x === last.x && d.y === last.y) return;
-      if (d.x === -last.x && d.y === -last.y) return;
-      if (s.queue.length >= TURN_BUFFER) s.queue[s.queue.length - 1] = d;
-      else s.queue.push(d);
+    /* постановка поворота в очередь стороны: клиент помечает вход
+       тиком, на котором ОН его применил (детерминизм предсказания);
+       опоздавший вход применяется при первом же тике. Повторы и
+       развороты на 180° игнорируются (и сразу подтверждаются — они
+       ничего не меняют); переполнение буфера (спам) выталкивает
+       СТАРЫЙ поворот — новый важнее */
+    function queueTurn(side, d, seq, tick) {
+      var q = pending[side];
+      var s = snakes[side];
+      var last = q.length ? q[q.length - 1].dir : s.dir;
+      if (d.x === last.x && d.y === last.y ||
+          d.x === -last.x && d.y === -last.y) {
+        ackSeq(side, seq);
+        return;
+      }
+      var when = Number.isFinite(tick) ? Math.max(Math.floor(tick), tickN + 1) : tickN + 1;
+      if (q.length >= TURN_BUFFER) q.shift();
+      q.push({ dir: d, seq: seq, tick: when });
     }
 
-    function takeTurn(s) {
-      while (s.queue.length) {
-        var d = s.queue.shift();
-        if (d.x === -s.dir.x && d.y === -s.dir.y) continue;
-        if (d.x === s.dir.x && d.y === s.dir.y) continue;
-        s.dir = d;
+    function ackSeq(side, seq) {
+      if (Number.isFinite(seq) && seq > seqAck[side]) seqAck[side] = seq;
+    }
+
+    /* один поворот за тик: FIFO, только входы, чей тик настал */
+    function takeTurn(side) {
+      var q = pending[side];
+      var s = snakes[side];
+      while (q.length && q[0].tick <= tickN) {
+        var e = q.shift();
+        ackSeq(side, e.seq);
+        if (e.dir.x === -s.dir.x && e.dir.y === -s.dir.y) continue;
+        if (e.dir.x === s.dir.x && e.dir.y === s.dir.y) continue;
+        s.dir = e.dir;
         break;
       }
     }
@@ -292,6 +350,36 @@
       return null;
     }
 
+    /* ---------- секрет арены: маска по номеру тика ---------- */
+
+    /* сила формы 0..1: плавный вход, плато, плавный выход */
+    function arenaK(tick) {
+      if (!arena || tick <= arena.s || tick >= arena.e) return 0;
+      if (tick < arena.s + ARENA_IN_TICKS) return (tick - arena.s) / ARENA_IN_TICKS;
+      if (tick > arena.e - ARENA_OUT_TICKS) return (arena.e - tick) / ARENA_OUT_TICKS;
+      return 1;
+    }
+
+    /* играбельна ли клетка на этом тике (центры клеток против маски);
+       ДУБЛИРУЕТСЯ в js/duel.js для предсказания — менять только парой */
+    function arenaOk(x, y, tick) {
+      if (!arena) return true;
+      var k = arenaK(tick);
+      if (k <= 0) return true;
+      var px = x + 0.5, py = y + 0.5;
+      var cx = GW / 2, cy = GH / 2;
+      if (arena.k === 'circle') {
+        var rFull = Math.sqrt(cx * cx + cy * cy);
+        var r = rFull - (rFull - Math.max(cx, cy) * 0.74) * k;
+        var dx = px - cx, dy = py - cy;
+        return dx * dx + dy * dy <= r * r;
+      }
+      /* pulse: сжатие → разжатие до исходного прямоугольника */
+      var m = Math.min(GW, GH) * 0.12 *
+        Math.sin((tick - arena.s) / (arena.e - arena.s) * Math.PI);
+      return px > m && px < GW - m && py > m && py < GH - m;
+    }
+
     /* ---------- тик ---------- */
 
     function targetOf(s) {
@@ -345,14 +433,29 @@
     function tick() {
       var s0 = snakes[0];
       var s1 = snakes[1];
-      takeTurn(s0);
-      takeTurn(s1);
+      tickN++;
+      takeTurn(0);
+      takeTurn(1);
+
+      /* расписание секрета арены: детерминированный телеграф —
+         10 тиков до старта маски (s = tickN + 10) */
+      if (!arena && tickN >= arenaNext) {
+        arena = {
+          k: Math.random() < 0.5 ? 'circle' : 'pulse',
+          s: tickN + 10,
+          e: tickN + 10 + ARENA_DUR_TICKS
+        };
+        arenaNext = tickN + ARENA_GAP_MIN +
+          Math.floor(Math.random() * (ARENA_GAP_MAX - ARENA_GAP_MIN));
+      }
 
       var t0 = targetOf(s0);
       var t1 = targetOf(s1);
       var wall = [false, false];
-      if (t0.x < 0 || t0.x >= GW || t0.y < 0 || t0.y >= GH) wall[0] = true;
-      if (t1.x < 0 || t1.x >= GW || t1.y < 0 || t1.y >= GH) wall[1] = true;
+      if (t0.x < 0 || t0.x >= GW || t0.y < 0 || t0.y >= GH ||
+          !arenaOk(t0.x, t0.y, tickN)) wall[0] = true;
+      if (t1.x < 0 || t1.x >= GW || t1.y < 0 || t1.y >= GH ||
+          !arenaOk(t1.x, t1.y, tickN)) wall[1] = true;
       if (wall[0] || wall[1]) {
         endRound(wall[0] && wall[1] ? -1 : (wall[0] ? 1 : 0), 'dCrash');
         return;
@@ -418,6 +521,12 @@
       tickTimer = 0;
       slowmo = 0;
       roundWinner = null;
+      tickN = 0;            // НЕТКОД v2: тики нумеруются внутри раунда
+      pending = [[], []];
+      seqAck = [0, 0];
+      seqAuto = [0, 0];
+      arena = null;        // новый раунд — арена с чистого листа
+      arenaNext = ARENA_FIRST_TICK;
       phase = 'countdown';
       phaseTimer = COUNTDOWN_TIME;
     }
@@ -495,12 +604,24 @@
         pt: Math.max(0, phaseTimer),
         sn: [packSnake(snakes[0]), packSnake(snakes[1])],
         d: [dirIndex(snakes[0].dir), dirIndex(snakes[1].dir)],
+        /* g — незавершённый рост (сегменты в полёте): клиенту нужен
+           для точного реплея от снапшота; p — таймер прохода сквозь
+           тело после укуса (мигание-щит на клиенте) */
+        g: [snakes[0].growth, snakes[1].growth],
+        p: [snakes[0].pass, snakes[1].pass],
         f: food.map(function (c) { return [c.x, c.y]; }),
         w: roundWinner,
         k: banner ? banner.key : null,
         kt: banner ? Math.max(0, banner.t) : 0,
         kc: banner ? banner.color : null,
-        ev: [events.bite, events.trap, events.eat, events.round]
+        ev: [events.bite, events.trap, events.eat, events.round],
+        /* НЕТКОД v2: tk — тик симуляции, st — серверное время (мс),
+           sq — последний подтверждённый seq входа каждой стороны;
+           ar — активный секрет арены {k, s, e} тиками (SPEC §14) */
+        tk: tickN,
+        st: Date.now(),
+        sq: [seqAck[0], seqAck[1]],
+        ar: arena ? { k: arena.k, s: arena.s, e: arena.e } : null
       };
     }
 
@@ -521,12 +642,19 @@
     return {
       begin: begin,
       update: update,
-      /* input(0|1, 'up'|'down'|'left'|'right'|{x,y}) */
-      input: function (side, d) {
+      /* input(0|1, 'up'|'down'|'left'|'right'|{x,y}, seq?, tick?) —
+         seq: порядковый номер входа от клиента; tick: тик, на котором
+         клиент применил вход (нет значений → старые immediate-клиенты) */
+      input: function (side, d, seq, tick) {
         if (!started || matchEnded) return;
         if (side !== 0 && side !== 1) return;
         var v = normDir(d);
-        if (v && snakes[side]) queueTurn(snakes[side], v);
+        if (!v || !snakes[side]) return;
+        var n = Number(seq);
+        if (!Number.isFinite(n) || n < 0 || n > 1e9) n = ++seqAuto[side];
+        var w = Number(tick);
+        if (!Number.isFinite(w) || w > tickN + 1000) w = tickN + 1;
+        queueTurn(side, v, n, w);
       },
       snapshot: snapshot,
       done: function () { return matchEnded; },

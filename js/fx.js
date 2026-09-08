@@ -313,11 +313,6 @@
       g.drawImage(spr, cx - w / 2, cy - h / 2, w, h);
     },
 
-    /* QA: how many baked sprites are alive right now (LRU <= 64) */
-    spriteCacheSize: function () {
-      return spriteCache.size;
-    },
-
     /* Particle burst at pixel coordinates; n defaults to 10.
        The oldest particles are dropped when the cap is reached. */
     burst: function (px, py, color, n) {

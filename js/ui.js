@@ -90,7 +90,11 @@
     for (let i = 0; i < entries.length; i++) {
       const e = entries[i];
       const tr = document.createElement('tr');
-      if (i < 3) tr.className = 'bd-top';
+      let cls = i < 3 ? 'bd-top' : '';
+      if (i === 0) cls += ' bd-lead'; // SPEC §13: лидер рейтинга — корона
+      if (CS.Leaderboard && typeof CS.Leaderboard.isMyName === 'function' &&
+          CS.Leaderboard.isMyName(e.name)) cls += ' bd-me'; // своя строка
+      tr.className = cls.trim();
       appendCell(tr, String(i + 1), 'bd-place');
       appendCell(tr, e.name, 'bd-name');
       appendCell(tr, String(e.score), 'bd-score');

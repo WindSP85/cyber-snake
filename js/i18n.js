@@ -199,6 +199,15 @@
       dDraw: 'НИЧЬЯ',
       dLeft: 'СОПЕРНИК ПОКИНУЛ БОЙ',
       dReady: 'БОЙ!',
+      duelPing: 'ПИНГ: {1}мс',
+      duelNetWait: 'СВЯЗЬ…',
+      autoSaved: '★ РЕЗУЛЬТАТ ЗАПИСАН',
+      pArena: 'СЕКРЕТ: АРЕНА МЕНЯЕТСЯ!',
+      rankLeader: '★ ТЫ ЛИДЕР РЕЙТИНГА!',
+      rankMine: 'ТВОЁ МЕСТО В РЕЙТИНГЕ: {1}',
+      lobbyLead: 'ЛИДЕР',
+      nickTitle: 'ВАШ НИК В ИГРЕ',
+      nickHint: 'Под ним тебя увидят таблица лидеров и соперники в дуэлях',
       /* feature T24: the duel lobby + result screen (SPEC §22) */
       duel: 'ЛОББИ ПВП',
       duelTitle: 'ЛОББИ ПВП',
@@ -503,6 +512,15 @@
       dDraw: 'DRAW',
       dLeft: 'RIVAL LEFT THE DUEL',
       dReady: 'FIGHT!',
+      duelPing: 'PING: {1}ms',
+      duelNetWait: 'CONNECTING…',
+      autoSaved: '★ RESULT SAVED',
+      pArena: 'SECRET: THE ARENA CHANGES!',
+      rankLeader: '★ YOU ARE THE RATING LEADER!',
+      rankMine: 'YOUR RATING RANK: {1}',
+      lobbyLead: 'LEADER',
+      nickTitle: 'YOUR GAME NICK',
+      nickHint: 'The leaderboard and your duel rivals will see this name',
       /* feature T24: the duel lobby + result screen (SPEC §22) */
       duel: 'PVP LOBBY',
       duelTitle: 'PVP LOBBY',
@@ -689,9 +707,9 @@
       notify();
     },
 
-    /* translate a key with an optional '{1}' substitution;
+    /* translate a key with optional '{1}'/'{2}' substitutions;
        unknown keys/languages never throw — ru (then the key) is used */
-    t: function (key, arg) {
+    t: function (key, arg, arg2) {
       const table = DICT[lang] || DICT[DEFAULT_LANG];
       const fallback = DICT[DEFAULT_LANG];
       let text;
@@ -700,6 +718,9 @@
       else return String(key);
       if (arg !== undefined && arg !== null) {
         text = String(text).replace('{1}', String(arg));
+      }
+      if (arg2 !== undefined && arg2 !== null) {
+        text = String(text).replace('{2}', String(arg2));
       }
       return String(text);
     },

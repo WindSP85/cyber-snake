@@ -223,6 +223,10 @@ function sendObj(ws, obj) {
    ждущего подтягиваются из ПВП-статистики (SPEC §28);
    сортировка по рейтингу: сильнейшие сверху, кап LOBBY_MAX */
 function lobbyList() {
+  /* лидер рейтинга (общая таблица, без сезона): его бейдж виден
+     соперникам при подборе игрока */
+  const top1 = store.top('', 1)[0];
+  const leadName = top1 ? String(top1.name || '').toLowerCase() : '';
   const all = [];
   rooms.forEach(function (room, code) {
     if (room.match && !room.match.done()) return; // идёт бой: не ждёт
@@ -232,13 +236,15 @@ function lobbyList() {
     name = String(name).slice(0, 20);
     const pub = store.pvpPublic(name);
     const st = pub ? pub.statuses : [];
+    /* SPEC §13: лидер общей таблицы рекордов подсвечен в подборе */
     all.push({
       code: code,
       name: name,
       rating: pub ? pub.rating : 1000,
       w: pub ? pub.wins : 0,
       l: pub ? pub.losses : 0,
-      st: st.slice(-3) // три старших статуса для строки лобби
+      st: st.slice(-3), // три старших статуса для строки лобби
+      lead: !!leadName && name.toLowerCase() === leadName
     });
   });
   all.sort(function (a, b) { return (b.rating | 0) - (a.rating | 0); });
@@ -377,8 +383,9 @@ function maybeRematch(room) {
   startRoomMatch(room);
 }
 
-/* шаг серверной симуляции: все живые матчи разом, снапшот 16/с —
-   та же частота, что была у хоста в T27 */
+/* шаг серверной симуляции: все живые матчи разом, снапшоты ~16/с —
+   та же частота, что была у хоста в T27 (накопитель вычитается, а
+   не обнуляется — иначе реальная частота проседает до 10/с) */
 const SIM_STEP = 50;          // мс шага update()
 const SNAP_EVERY = 0.0625;    // с между снапшотами
 setInterval(function () {
@@ -388,7 +395,7 @@ setInterval(function () {
     m.update(SIM_STEP / 1000);
     room.snapAcc = (room.snapAcc || 0) + SIM_STEP / 1000;
     if (room.snapAcc >= SNAP_EVERY || m.done()) {
-      room.snapAcc = 0;
+      room.snapAcc -= SNAP_EVERY;
       roomSend(room, 'state', m.snapshot());
     }
   });
@@ -531,19 +538,25 @@ function handleJson(ws, msg) {
     const room = rooms.get(ws._room);
     if (!room) return;
 
-    /* серверная дуэль: пока матч жив, ходы кормят симулятор,
-       а клиентские 'state'/'round'/'win'/'start' больше не релеятся */
+    /* серверная дуэль: пока матч жив, ходы кормят симулятор */
     if (room.match && !room.match.done()) {
       if (type === 'turn') {
         const side = room.sideOf[ws._id];
         if (side === 0 || side === 1) {
-          room.match.input(side, msg.data && msg.data.dir);
+          /* НЕТКОД v2: seq/tick проходят насквозь — симуляция
+             подтверждает seq в снапшоте (sq) и применяет вход на
+             тике клиента (детерминизм предсказания) */
+          room.match.input(side, msg.data && msg.data.dir,
+            msg.data && msg.data.seq, msg.data && msg.data.tick);
         }
         return;
       }
-      if (type === 'state' || type === 'round' || type === 'win' || type === 'start') {
-        return;
-      }
+    }
+    /* 'state'/'round'/'win'/'start' — АВТОРИТАРНЫЕ типы: их шлёт
+       только сервер (from '#server'). Релей от клиента — никогда:
+       злой соперник не может поднять фантомный матч чужому ui */
+    if (type === 'state' || type === 'round' || type === 'win' || type === 'start') {
+      return;
     }
     if (type === 'ready' || type === 'unready') {
       if (room.ready) room.ready[ws._id] = type === 'ready';

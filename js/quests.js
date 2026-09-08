@@ -98,6 +98,19 @@
     };
   }
 
+  /* выкинуть ключи prefix+stamp, кроме текущего (анти-разрастание
+     localStorage: по ключу в день/неделю, чистить их никто не будет) */
+  function prunePrefixed(prefix, keepStamp) {
+    try {
+      const kill = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (k && k.indexOf(prefix) === 0 && k !== prefix + keepStamp) kill.push(k);
+      }
+      for (let i = 0; i < kill.length; i++) window.localStorage.removeItem(kill[i]);
+    } catch (err) { /* нет списка — нет чистки */ }
+  }
+
   function bump(storageKey, stamp, quest, delta) {
     let raw = loadRaw(storageKey, stamp);
     if (!raw || raw.id !== quest.id) raw = { stamp: stamp, id: quest.id, have: 0 };
@@ -139,21 +152,27 @@
       if (seen.indexOf(e.foe) === -1) {
         seen.push(e.foe);
         if (seen.length > 30) seen = seen.slice(-30);
-        try { window.localStorage.setItem(seenKey, JSON.stringify(seen)); } catch (err) { /* нет */ }
+        try {
+          window.localStorage.setItem(seenKey, JSON.stringify(seen));
+          prunePrefixed('cs_quest_foes_', weekStr()); // прошлые недели — на свалку
+        } catch (err) { /* нет */ }
         bump(WEEK_KEY, weekStr(), week, 1);
       }
     }
-    if (week.id === 'streak4') {
-      /* прогресс = длина ТЕКУЩЕЙ серии побед: поражение обнуляет */
+    /* серия побед ведётся ВСЕГДА (и в недели без streak4):
+       протухшая серия не должна закрывать квест одним матчем */
+    {
       const sk = 'cs_quest_streak';
       let cur = 0;
       try { cur = Number(window.localStorage.getItem(sk)) || 0; } catch (err) { cur = 0; }
       cur = win ? Math.max(cur, 0) + 1 : 0;
       try { window.localStorage.setItem(sk, String(cur)); } catch (err) { /* нет */ }
-      let raw = loadRaw(WEEK_KEY, weekStr());
-      if (!raw || raw.id !== 'streak4') raw = { stamp: weekStr(), id: 'streak4', have: 0 };
-      raw.have = win ? Math.min(week.need, cur) : 0;
-      saveRaw(WEEK_KEY, raw);
+      if (week.id === 'streak4') {
+        let raw = loadRaw(WEEK_KEY, weekStr());
+        if (!raw || raw.id !== 'streak4') raw = { stamp: weekStr(), id: 'streak4', have: 0 };
+        raw.have = win ? Math.min(week.need, cur) : 0;
+        saveRaw(WEEK_KEY, raw);
+      }
     }
     if (week.id === 'rounds20') {
       bump(WEEK_KEY, weekStr(), week, Math.max(0, Number(e.roundsWon) || 0));
@@ -172,8 +191,6 @@
   }
 
   CS.Quests = {
-    daily: function () { return progress('daily'); },
-    weekly: function () { return progress('weekly'); },
     progress: progress,
     event: function (evt) {
       try {

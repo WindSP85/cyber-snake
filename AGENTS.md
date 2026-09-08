@@ -41,7 +41,9 @@ node check-secrets.js
 - `js/game.js` — ядро: адаптивная сетка, змейка, пикапы/тайны/хранилище, боссы-интеграция, смерть/жизни, QA-крюки (`?debug=1`).
 - `js/bosses.js` — 8 типов боссов, `CS.BossFight` (gridW/gridH параметризованы).
 - `js/leaderboard.js` — локальный топ + глобальный через свой сервер (apiBase, SPEC §28; деградация в офлайне).
-- `server/` — игровой сервер VPS: `server.js` (API + WS-реле), `store.js` (json-хранилище), `bot.js` (Telegram long polling), `ws/` (вендорная библиотека ws, обновляется заменой каталога), `test/` — тесты (обязательны: `node server/test/run-tests.js` и `node server/test/run-game-transport.js`).
+- `js/duel-core.js` — ядро дуэли: ЕДИНЫЙ код симуляции для сервера (Node) и браузера; в контейнер попадает как `server/duel-core.js` (копирует deploy, Dockerfile ждёт его там). Правки — только в этот файл, ни в коем случае не плодить копию.
+- `js/duel.js` — неткод v2 клиента дуэли (SPEC §27.2): предсказание+реплей, error blending, интерполяция соперника; серверная авторитарность.
+- `server/` — игровой сервер VPS: `server.js` (API + WS-реле + серверные дуэли через duel-core), `store.js` (json-хранилище), `bot.js` (Telegram long polling), `ws/` (вендорная библиотека ws, обновляется заменой каталога), `test/` — тесты (обязательны: `node server/test/run-tests.js`, `node server/test/run-game-transport.js` и `node server/test/run-duel-netcode.js` — неткод дуэли).
 - `Dockerfile`, `docker-compose.yml`, `server/Caddyfile`, `deploy/deploy.py` — разворачивание на VPS (SPEC §28).
 - `js/audio.js` — синтез музыки/SFX; `js/fx.js` — частицы/глитч; `js/ui.js` — экраны/HUD/D-pad.
 - Вся серверная часть — собственный VPS-сервер из `server/` (сторонние облака не используются).

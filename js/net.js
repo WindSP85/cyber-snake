@@ -97,11 +97,33 @@
       const wa = window.Telegram && window.Telegram.WebApp;
       const u = wa && wa.initDataUnsafe && wa.initDataUnsafe.user;
       if (u) {
-        const tg = String(u.username || u.first_name || '').trim().slice(0, NAME_MAX);
-        if (tg) {
-          myName = tg;
+        /* приоритет: TG-ник → выбранный игровой ник (cs_name, его же
+           спрашивал входной диалог SPEC §13) → имя профиля */
+        const nick = String(u.username || '').trim().slice(0, NAME_MAX);
+        if (nick) {
+          myName = nick;
           return;
         }
+      }
+      try {
+        const saved = String(window.localStorage.getItem(NAME_KEY) || '').trim().slice(0, NAME_MAX);
+        if (saved) {
+          myName = saved;
+          return;
+        }
+      } catch (e) {
+        /* нет хранилища — дальше имя профиля */
+      }
+      try {
+        if (u) {
+          const first = String(u.first_name || '').trim().slice(0, NAME_MAX);
+          if (first) {
+            myName = first;
+            return;
+          }
+        }
+      } catch (e) {
+        /* уже вне зоны риска */
       }
     } catch (e) {
       /* not inside Telegram: try the local nick */
@@ -132,8 +154,13 @@
 
   /* ---------- presence plumbing ---------- */
 
+  /* id прошлого presence-списка: без него нельзя посчитать уходы */
+  let prevIds = null;
+
   /* the server list [{id, name}] → the API shape [{id, name,
-     online, self}] every consumer already understands */
+     online, self}] every consumer already understands; info carries
+     the REAL membership diff (joined/left) — consumers decide what
+     left means: a forfeit, a network drop, a room exit */
   function emitPresence(list) {
     const snapshot = [];
     const arr = Array.isArray(list) ? list : [];
@@ -146,8 +173,18 @@
       });
     }
     const ids = snapshot.map(function (x) { return x.id; });
-    const info = { joined: ids, left: [] }; // membership DIFF details
-    // are not needed downstream: every consumer re-reads the full list
+    const joined = [];
+    const left = [];
+    if (prevIds) {
+      for (let i = 0; i < ids.length; i++) {
+        if (prevIds.indexOf(ids[i]) === -1) joined.push(ids[i]);
+      }
+      for (let i = 0; i < prevIds.length; i++) {
+        if (ids.indexOf(prevIds[i]) === -1) left.push(prevIds[i]);
+      }
+    }
+    prevIds = ids;
+    const info = { joined: joined, left: left };
     const cbs = presenceCbs.slice();
     for (let i = 0; i < cbs.length; i++) {
       try { cbs[i](snapshot, info); } catch (e) { /* a broken listener must not break the room */ }
@@ -182,6 +219,7 @@
     const ws = socket;
     socket = null;
     roomCode = '';
+    prevIds = null; // комната закрыта: diff отсчитывается заново
     joinSettled = true;
     joinDone = null;
     if (joinTimer) {
@@ -354,15 +392,28 @@
     }
   }
 
-  /* cb(type, data, fromId) for every FOREIGN message */
+  /* cb(type, data, fromId) for every FOREIGN message; returns an
+     unsubscribe token (callers may ignore it — the module is single
+     use per page, but a repeat init must not double-fire) */
   function onMessage(cb) {
-    if (typeof cb === 'function') msgCbs.push(cb);
+    if (typeof cb !== 'function') return function () {};
+    msgCbs.push(cb);
+    return function () {
+      const at = msgCbs.indexOf(cb);
+      if (at !== -1) msgCbs.splice(at, 1);
+    };
   }
 
   /* cb(list, diff): list — the full actual [{id, name, online,
-     self}] snapshot; diff — {joined, left} of the triggering event */
+     self}] snapshot; diff — {joined, left} of the triggering event;
+     also returns an unsubscribe token */
   function onPresence(cb) {
-    if (typeof cb === 'function') presenceCbs.push(cb);
+    if (typeof cb !== 'function') return function () {};
+    presenceCbs.push(cb);
+    return function () {
+      const at = presenceCbs.indexOf(cb);
+      if (at !== -1) presenceCbs.splice(at, 1);
+    };
   }
 
   /* the socket itself is the liveness now (server pings it);

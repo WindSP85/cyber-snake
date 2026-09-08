@@ -125,6 +125,20 @@ async function tests() {
   r = await api('POST', '/api/score', 'not-json');
   ok(r.status === 400, 'score: не-JSON → 400');
 
+  /* один игрок — один рекорд в сезоне: худший мимо (регистронезависимо),
+     лучший перезаписывает свою строку */
+  await api('POST', '/api/score', { name: 'Twice', score: 500, level: 2, season: '2026-08' });
+  await api('POST', '/api/score', { name: 'twice', score: 300, level: 2, season: '2026-08' });
+  r = await api('GET', '/api/top?season=2026-08&limit=50');
+  let twiceRows = r.json.rows.filter(function (x) { return String(x.name).toLowerCase() === 'twice'; });
+  ok(twiceRows.length === 1 && twiceRows[0].score === 500,
+    'score: худший результат не плодит дублей, лучший остаётся');
+  await api('POST', '/api/score', { name: 'TWICE', score: 900, level: 3, season: '2026-08' });
+  r = await api('GET', '/api/top?season=2026-08&limit=50');
+  twiceRows = r.json.rows.filter(function (x) { return String(x.name).toLowerCase() === 'twice'; });
+  ok(twiceRows.length === 1 && twiceRows[0].score === 900,
+    'score: улучшение перезаписывает рекорд игрока');
+
   r = await api('POST', '/api/duel', { winner: 'Alice', loser: 'Bob', rounds: '2:1' });
   ok(r.status === 201, 'duel: валидный матч → 201');
   r = await api('POST', '/api/duel', { winner: '', loser: 'Bob', rounds: '2:1' });
@@ -188,11 +202,20 @@ async function tests() {
   ok(m.list.some(function (x) { return x.id === 'bbbbbbbb'; }), 'A видит вход B');
 
   /* реле: сообщение A → B, эхо самому себе нет */
-  sendW(A, { t: 'msg', type: 'state', data: { tick: 7 } });
+  sendW(A, { t: 'msg', type: 'hello', data: { tick: 7 } });
   m = await waitFor(B, function (x) { return x.t === 'msg'; }, 'msg A→B');
-  ok(m.from === 'aaaaaaaa' && m.type === 'state' && m.data.tick === 7, 'реле доставляет type/data/from');
+  ok(m.from === 'aaaaaaaa' && m.type === 'hello' && m.data.tick === 7, 'реле доставляет type/data/from');
   await new Promise(function (r) { setTimeout(r, 150); });
   ok(!A._inbox.some(function (x) { return x.t === 'msg'; }), 'свои сообщения не возвращаются');
+
+  /* авторитарные типы ('state'/'round'/'win'/'start') от клиентов
+     не релеются НИКОГДА: их шлёт только сервер (from '#server') —
+     злой соперник не поднимет фантомный матч */
+  sendW(A, { t: 'msg', type: 'start', data: { side: 0 } });
+  sendW(A, { t: 'msg', type: 'win', data: { side: 0 } });
+  await new Promise(function (r) { setTimeout(r, 150); });
+  ok(!B._inbox.some(function (x) { return x.t === 'msg' && (x.type === 'start' || x.type === 'win'); }),
+    'фейковые start/win от клиента не доходят сопернику');
 
   /* ping/pong */
   sendW(A, { t: 'ping' });

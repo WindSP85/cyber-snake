@@ -96,21 +96,46 @@
     g.closePath();
   }
 
-  /* diagonal "construction tape" stripes inside a band, running with time */
-  function hatchBand(g, x, y, w, h, time, color, spacing, speed) {
-    g.save();
-    g.beginPath();
-    g.rect(x, y, w, h);
-    g.clip();
-    g.strokeStyle = color;
-    g.lineWidth = 3;
-    const off = (time * speed) % spacing;
-    for (let s = -h - spacing; s < w + h; s += spacing) {
-      g.beginPath();
-      g.moveTo(x + s + off, y + h + 2);
-      g.lineTo(x + s + off + h, y - 2);
-      g.stroke();
+  /* diagonal "construction tape" stripes inside a band, running with
+     time. PERF: полоса запечена в tile-канвас и кладётся паттерном с
+     translate-сдвигом — вместо save+clip и десятка strokes на полосу
+     каждый кадр один fillRect (кэш по цвету+шагу, LRU не нужен:
+     комбинаций три-четыре за бой) */
+  const hatchTiles = {};
+  function hatchTile(color, spacing) {
+    const tk = color + '|' + spacing;
+    if (hatchTiles[tk]) return hatchTiles[tk];
+    const size = spacing * 2; // период диагонали: сдвиг на spacing
+    const cv = document.createElement('canvas');
+    cv.width = size;
+    cv.height = size;
+    const c = cv.getContext('2d');
+    if (!c) return null;
+    c.strokeStyle = color;
+    c.lineWidth = 3;
+    c.beginPath();
+    /* семейство параллельных диагоналей x+y = v (наклон как у
+       оригинала: вправо-вверх), шаг v = spacing — тайл размера
+       2·spacing стыкуется без швов */
+    for (let v = -spacing; v <= 2 * size + spacing; v += spacing) {
+      c.moveTo(v - size - 2, size + 2);
+      c.lineTo(v + 2, -2);
     }
+    c.stroke();
+    hatchTiles[tk] = cv;
+    return cv;
+  }
+
+  function hatchBand(g, x, y, w, h, time, color, spacing, speed) {
+    const tile = hatchTile(color, spacing);
+    if (!tile) return;
+    const pat = g.createPattern(tile, 'repeat');
+    if (!pat) return;
+    const off = (time * speed) % (spacing * 2);
+    g.save();
+    g.translate(x + off, y);
+    g.fillStyle = pat;
+    g.fillRect(-off, 0, w + spacing * 2, h);
     g.restore();
   }
 
@@ -209,7 +234,7 @@
     /* ============================================================
        UPDATE — main state machine
        ============================================================ */
-    update(dt, snakeCells) {
+    update(dt, snakeCells, avoidKeys) {
       if (!this.active || this.phase === 'dead') return;
       this.time += dt;
 
@@ -223,10 +248,18 @@
 
       const cells = Array.isArray(snakeCells) ? snakeCells : [];
       this.snakeCells = cells;
-      this.snakeKeys = new Set();
+      /* PERF: Set переиспользуется (clear+add), не аллоцируется заново
+         каждый кадр; SPEC §4: avoidKeys — еда/бонусы/пикапы, босс на
+         них не заходит (заряды/мины проверялись и раньше) */
+      if (!this.snakeKeys) this.snakeKeys = new Set();
+      this.snakeKeys.clear();
       for (let i = 0; i < cells.length; i++) {
         this.snakeKeys.add(key(cells[i].x, cells[i].y));
       }
+      this.avoidKeys = avoidKeys instanceof Set ? avoidKeys : null;
+      /* PERF: кэш hazardCells живёт до следующего update — раньше Set
+         из ~50-90 ключей строился 2-3 раза за кадр */
+      this._hazCache = null;
       if (cells.length) this.head = { x: cells[0].x, y: cells[0].y };
 
       this.updateCharge(dt);
@@ -318,6 +351,7 @@
         for (let j = 0; j < 2; j++) {
           const cx = nx + i, cy = ny + j;
           if (this.snakeKeys.has(key(cx, cy))) return false;
+          if (this.avoidKeys && this.avoidKeys.has(key(cx, cy))) return false;
           if (this.charge && this.charge.x === cx && this.charge.y === cy) return false;
           for (let m = 0; m < this.mines.length; m++) { // never sit on a mine
             if (this.mines[m].x === cx && this.mines[m].y === cy) return false;
@@ -880,6 +914,7 @@
     }
 
     hazardCells() {
+      if (this._hazCache) return this._hazCache;
       const out = new Set();
       if (!this.active) return out;
 
@@ -936,8 +971,16 @@
         }
       }
 
-      // NOTE (type 4): the decompiler beam is deliberately NOT here —
-      // crossing it wounds (cuts segments), it never kills
+      // feature T9 (SPEC §12): активный луч декомпилятора смертелен —
+      // «голова в луче = смерть» (тело режет applyRipperCut при зажигании)
+      if (this.phase === 'attack' && this.attackKind === 'ripper' && this.ripper) {
+        if (this.ripper.axis === 'row') {
+          for (let cx = 0; cx < this.gridW; cx++) out.add(key(cx, this.ripper.index));
+        } else {
+          for (let cy = 0; cy < this.gridH; cy++) out.add(key(this.ripper.index, cy));
+        }
+      }
+      this._hazCache = out;
       return out;
     }
 

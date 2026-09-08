@@ -59,6 +59,20 @@
     return 'cs_daily_' + dateStr();
   }
 
+  /* выкинуть cs_daily_* прошлых дней (по одному ключу в день,
+     чистить их кроме нас никто не будет) */
+  function pruneDaily() {
+    try {
+      const keep = bestKey();
+      const kill = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (k && k.indexOf('cs_daily_') === 0 && k !== keep) kill.push(k);
+      }
+      for (let i = 0; i < kill.length; i++) window.localStorage.removeItem(kill[i]);
+    } catch (e) { /* нет списка — нет чистки */ }
+  }
+
   CS.Daily = {
     /* the modifier of the day with its i18n keys and the raw seed */
     today: function () {
@@ -104,6 +118,7 @@
       if (Number.isFinite(n) && n > CS.Daily.best()) {
         try {
           window.localStorage.setItem(bestKey(), String(n));
+          pruneDaily(); // ключи прошлых дней не копятся вечно
         } catch (e) {
           /* storage unavailable: the record lives until reload */
         }

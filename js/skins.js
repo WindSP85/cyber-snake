@@ -54,7 +54,15 @@
 
   /* ---------- state ---------- */
 
-  let currentId = loadSkin();
+  /* лениво: loadSkin() на инициализации модуля видел ещё не
+     загруженный CS.DuelUI (кэш ПВП-статусов пуст) и сбрасывал
+     выбранный ПВП-скин на neon при каждой перезагрузке */
+  let currentId = null;
+
+  function currentSkinId() {
+    if (currentId === null) currentId = loadSkin();
+    return currentId;
+  }
 
   /* ---------- helpers ---------- */
 
@@ -102,15 +110,28 @@
     );
   }
 
-  /* 'rainbow' ignores n and flows with the animation clock:
-     hue = (animTime*60 + i*30) % 360, s = 100%, l = 55% */
+  /* PERF-кэш: hsl-строки — единственный массовый аллокатор кадра
+     (30+ сегментов x 60 fps); градиент скина зависит только от (id, n),
+     радуга квантуется до 15° — плавность не страдает, строки конечны */
+  const colorCache = {};
+
   function colorOf(def, i, n, animTime) {
     if (def.id === 'rainbow') {
       const t = Number.isFinite(animTime) ? animTime : 0;
-      const hue = (((t * 60 + i * 30) % 360) + 360) % 360;
-      return hsl(hue, 100, 55);
+      let hue = Math.floor((t * 60 + i * 30) / 15) * 15;
+      hue = ((hue % 360) + 360) % 360;
+      if (!colorCache.rb) colorCache.rb = {};
+      if (!colorCache.rb[hue]) colorCache.rb[hue] = hsl(hue, 100, 55);
+      return colorCache.rb[hue];
     }
-    return gradientColor(def, n <= 1 ? 0 : i / (n - 1));
+    let byN = colorCache[def.id];
+    if (!byN) byN = colorCache[def.id] = {};
+    if (!byN[n]) {
+      const arr = [];
+      for (let k = 0; k < n; k++) arr.push(gradientColor(def, n <= 1 ? 0 : k / (n - 1)));
+      byN[n] = arr;
+    }
+    return byN[n][i];
   }
 
   /* ---------- persistence ---------- */
@@ -158,7 +179,7 @@
 
     /* the active skin id; never a locked or unknown one */
     current: function () {
-      return currentId;
+      return currentSkinId();
     },
 
     /* pick a skin — only an unlocked one, otherwise false */
@@ -172,19 +193,19 @@
 
     /* css color of the segment i of n for the active skin */
     colors: function (i, n, animTime) {
-      return colorOf(defById(currentId) || DEFS[0], i, n, animTime);
+      return colorOf(defById(currentSkinId()) || DEFS[0], i, n, animTime);
     },
 
     /* whole-snake transparency (feature T17: the ghost skin) */
     alpha: function () {
-      const def = defById(currentId) || DEFS[0];
+      const def = defById(currentSkinId()) || DEFS[0];
       return typeof def.alpha === 'number' ? def.alpha : 1;
     },
 
     /* the glow around the head = the head color at this moment
        (the rainbow glow flows with animTime) */
     headGlow: function (animTime) {
-      return colorOf(defById(currentId) || DEFS[0], 0, 1, animTime);
+      return colorOf(defById(currentSkinId()) || DEFS[0], 0, 1, animTime);
     },
 
     /* 5 static swatch colors (ui.js); the rainbow gets a full

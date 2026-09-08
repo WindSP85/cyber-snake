@@ -2770,3 +2770,87 @@ body.in-telegram .tg-only {
   box-shadow: 0 0 10px rgba(255, 230, 0, .12);
 }
 
+
+
+/* ---- SPEC §13: входной диалог ника (Telegram id-only игрок) ---- */
+.nick-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 5, 12, .8);
+}
+
+.nick-panel {
+  width: min(420px, 86vw);
+  padding: 22px 24px 20px;
+  text-align: center;
+  background: rgba(10, 14, 30, .94);
+  border: 1px solid rgba(0, 240, 255, .4);
+  box-shadow:
+    0 0 24px rgba(0, 240, 255, .18),
+    inset 0 0 14px rgba(0, 240, 255, .05);
+}
+
+.nick-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  color: #00f0ff;
+  text-shadow: 0 0 10px rgba(0, 240, 255, .55);
+}
+
+.nick-hint {
+  margin: 8px 0 16px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(234, 252, 255, .72);
+}
+
+
+/* ---- SPEC §13: топ-100 — прокрутка, липкая шапка, метки строк ---- */
+.board-scroll {
+  max-height: 52vh;
+  overflow-y: auto;
+  border-top: 1px solid rgba(0, 240, 255, .25);
+  border-bottom: 1px solid rgba(0, 240, 255, .25);
+}
+
+.board-scroll .board-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #0a0e1e;
+}
+
+.board-table tr.bd-lead td {
+  color: #ffe600;
+  text-shadow: 0 0 8px rgba(255, 230, 0, .55);
+}
+
+.board-table tr.bd-lead td.bd-place::after {
+  content: ' °5';
+  color: #ffe600;
+}
+
+.board-table tr.bd-me td {
+  background: rgba(0, 240, 255, .07);
+  box-shadow: inset 2px 0 0 #00f0ff;
+}
+
+/* чип «ЛИДЕР РЕЙТИНГА» в карточке лобби (SPEC §13) */
+.lc-lead {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #ffe600;
+  border: 1px solid rgba(255, 230, 0, .55);
+  border-radius: 3px;
+  text-shadow: 0 0 6px rgba(255, 230, 0, .5);
+}

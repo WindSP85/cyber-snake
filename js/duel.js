@@ -1,32 +1,52 @@
 /* ============================================================
-   NEON://SNAKE — online duel core (feature T23, SPEC §22)
-   CS.Duel is the full duel simulation living inside game.js as
-   the 'duel' state: the main rAF loop keeps running, but its
-   update/render branch into this module while a match is live.
-   The solo game states are never touched by duel code.
+   NEON://SNAKE — online duel renderer + netcode (T23, SPEC §22)
+   CS.Duel lives inside game.js as the 'duel' state: the main rAF
+   loop keeps running, but its update/render branch into this
+   module while a match is live. The solo game states are never
+   touched by duel code.
 
-   Host authority (SPEC §22): the host simulates BOTH snakes and
-   broadcasts state snapshots every 100 ms; the guest renders the
-   snapshots and only sends its turns. Transport: CS.Net.send /
-   CS.Net.onMessage (js/net.js, T22) — without a room every send
-   degrades silently, so the module never breaks offline/file://.
+   НЕТКОД v2 — серверная авторитарность + стандарты быстрых
+   сетевых игр (подход Quake/Source/Overwatch, адаптированный
+   под клеточную змейку):
+   - СЕРВЕР считает матч (server/duel-core.js): столкновения,
+     укусы, западни, раунды — истина только там. Оба клиента —
+     равноправные рендереры снапшотов 16/с.
+   - INSTANT INPUT: свой поворот применяется на следующем ЛОКАЛЬНОМ
+     тике (отклик без сетевого круга — «как в соло», SPEC §27.2).
+   - SEQUENCED INPUTS + ACK: каждый вход нумеруется (seq) и
+     помечается тиком применения; снапшот подтверждает его (sq).
+   - RECONCILIATION (rewind & replay): от авторитарного состояния
+     на тике tk реплеятся ТОЛЬКО неподтверждённые входы до
+     текущего локального тика. Вход, пришедший серверу вовремя,
+     применяется там ровно на том же тике — реплей совпадает с
+     предсказанием в ноль коррекций.
+   - ERROR BLENDING: расхождение (джиттер, поздний вход, еда)
+     превращается в экспоненциально гаснущее визуальное смещение —
+     никаких телепортов «фантомной» змейки.
+   - ENTITY INTERPOLATION: соперник рисуется интерполяцией буфера
+     снапшотов на отложенном адаптивном таймлайне (джиттер-буфер):
+     сеть колышется — движение нет.
+   - RATE SYNC: локальный тиковый таймлайн опережает серверный на
+     oneWay+1 тиков и мягко подстраивается (±15%) — предсказание
+     не уезжает и не отстаёт.
+   - STARVATION: снапшотов нет >0.6 с — таймлайн замирает (без
+     дикой экстраполяции), связь вернулась — плавный догон.
 
-   Round rules (SPEC §22, sacred):
+   Round rules (SPEC §22, sacred — решает СЕРВЕР):
    - wall / own body              -> round to the rival
-   - head into the rival's body   -> BITE: the rival is cut at the
-     bite point, the dropped segments become food (2 cells per 3
-     segments, rounded up, max 12), the biter rides through the
-     body for 0.4 s; fewer than 3 segments left -> DEVOURED
+   - head into the rival's body   -> BITE: the rival is cut, the
+     dropped segments become food, the biter rides through 0.4 s;
+     fewer than 3 segments left -> DEVOURED
    - head-on (same cell / swap)   -> the longer snake wins,
      equal lengths -> round draw
-   - TRAPPED: flood fill from the head over free cells (food is
-     passable) < length + 5  -> round to the encircler with a
-     1 s slow-mo, flash and banner
+   - TRAPPED: flood fill from the head < length + 5 -> round to
+     the encircler with a 1 s slow-mo
    Match: best of 3 rounds, first to 2 wins.
 
    Public surface (game.js + the T24 ui):
      CS.Duel.init({cell, grid, hooks})        — game.js injection
-     CS.Duel.begin({host, myIndex, onMatchEnd}) — start a match
+     CS.Duel.begin({host?, myIndex, onMatchEnd}) — start a match
+       (host — легаси-поле: симуляция всегда на сервере)
      CS.Duel.stop()                           — teardown anytime
      CS.Duel.active()                         — is a match live
      CS.Duel.update(dt) / draw(g)             — 'duel' branches
@@ -41,31 +61,41 @@
   /* ---------- tuning (SPEC §22) ---------- */
 
   const TICK_RATE = 9.5;          // shared ticks per second (x1.15 fix)
+  const TICK_STEP = 1 / TICK_RATE; // seconds per simulation tick
   const START_LEN = 5;            // snake length at a round start
   const START_X0 = 0.15;          // opposite thirds of the arena
   const START_X1 = 0.85;
-  const TURN_BUFFER = 1;          // one buffered turn per snake
+  const TURN_BUFFER = 3;          // как буфер ввода соло (SPEC §2):
+                                  // быстрые «уголки» не теряются
   const COUNTDOWN_TIME = 3;       // 3-2-1 phase, s
   const ROUNDEND_TIME = 2.5;      // round result banner, s
-  const MATCH_WINS = 2;           // first to 2 wins
-  const MATCH_ROUNDS = 3;         // ...of at most 3 rounds
   const FOOD_STANDING = 2;        // packets on the field, always
   const FOOD_GROW = 2;            // segments gained per packet
-  const FOOD_TOTAL_MAX = 16;      // hard cap incl. bite leftovers
-  const FOOD_PER_CUT = 3;         // 2 food cells per 3 cut segs
-  const FOOD_CUT_MAX = 12;        // max food cells per bite
-  const BITE_PASS_TIME = 0.4;     // ride-through window, s
-  const BITE_MIN_KEEP = 3;        // fewer left -> devoured
-  const TRAP_MARGIN = 5;          // reachable < len + 5 -> trapped
-  const TRAP_SLOWMO = 1;          // slow-mo length, s
-  const TRAP_SLOW_FACTOR = 0.2;   // simulation speed while trapped
-  const STATE_INTERVAL = 0.0625;  // host snapshot broadcast, s (T27: 16/s)
-  const STATE_TIMEOUT = 10;       // guest rival-drop threshold, s —
-                                  // больше серверного грейса (8 c): обрыв
-                                  // связи лечится переподключением, и матч
-                                  // не рвётся из-за пары секунд тишины
-  const SNAP_LERP = 0.12;         // guest head lerp window, s
+  const TRAP_SLOWMO = 1;          // slow-mo length, s (visual)
+  const TRAP_SLOW_FACTOR = 0.2;   // banner/phase slowdown while trapped
+  const STATE_TIMEOUT = 10;       // rival-drop threshold, s — больше
+                                  // серверного грейса (8 c): обрыв
+                                  // лечится переподключением
   const TICK_GUARD = 6;           // max ticks per update frame
+  /* неткод v2 */
+  const INPUT_LOG_MAX = 64;       // своя история входов (реплей)
+  const SNAP_BUF_MAX = 12;        // снапшотов соперника в буфере
+  const STARVE_AFTER = 0.6;       // с такой тишиной таймлайн замирает, s
+  const RESYNC_JUMP = 2;          // тиков пропуска после тишины: прыжок
+  const LEAD_DEFAULT = 2.5;       // стартовое опережение сервера, тиков
+  const LEAD_MIN = 1.5;
+  const LEAD_MAX = 5;
+  const RATE_K = 0.25;            // gain регулятора темпа
+  const RATE_MIN = 0.85;
+  const RATE_MAX = 1.15;
+  const DELAY_MIN = 0.8;          // интерполяционная задержка, тиков
+  const DELAY_MAX = 6;
+  const DELAY_TARGET = 1.25;      // соперник отстаёт от последнего tk
+  const DELAY_SPEED = 2;          // тиков/с — скорость адаптации
+  const ERR_DECAY = 0.12;         // базовая постоянная гашения, s
+  const ERR_CAP = 14;              // потолок смещения на сегмент, клеток
+  const SNAP_CELLS = 18;          // катастрофа (в среднем на сегмент) — прыжок
+  const PING_WINDOW = 15;         // окно оценки one-way, снапшотов
 
   const DIR = {
     up: { x: 0, y: -1 },
@@ -90,11 +120,12 @@
 
   /* ---------- state ---------- */
 
-  let GW = 42;                 // arena, cells (×2 solo area)
-  let GH = 28;
+  /* дефолт арены — от серверного ядра (index.html грузит duel-core
+     раньше): fallback-числа только для отдельного sandbox-запуска */
+  let GW = (CS.DuelCore && CS.DuelCore.GRID_W) || 42;
+  let GH = (CS.DuelCore && CS.DuelCore.GRID_H) || 28;
   let live = false;            // a match is running
-  let host = true;             // host authority flag
-  let myIndex = 0;             // my snake (host default 0)
+  let myIndex = 0;             // my snake side (server 'start')
   let foeIndex = 1;
   let onMatchEndCb = null;
 
@@ -104,37 +135,37 @@
   let score = [0, 0];
   let roundWinner = null;      // 0|1|-1 once a round resolved
   let matchEnded = false;
-  let snakes = [];             // [{segs,dir,queue,growth,pass}] x 2
-  let food = [];               // [{x,y}]
-  let tickTimer = 0;
+  let snakes = [];             // авторитарные змейки из снапшотов
+  let food = [];               // авторитарная еда из снапшота
   let animTime = 0;
-  let slowmo = 0;              // TRAP_SLOWMO seconds remaining
+  let slowmo = 0;              // TRAP_SLOWMO seconds remaining (visual)
   let banner = null;           // {key,t,total,color}
-  let lastCount = -1;          // countdown beep tracker
-
-  let stateTimer = 0;          // host: broadcast throttle
-  let netStateAge = 0;         // guest: seconds since last state
-  let snapAge = 0;             // guest: seconds since snapshot
-  let pred = null;             // T27 guest prediction of MY snake
-  let predTimer = 0;           // guest: local tick accumulator
-  let predPrevHead = null;     // T27 reconciliation: my head one tick ago
-  let predTrail = [];          // T27: my last few head cells ("x,y")
   let rivalName = '';          // T27b: shown above the rival's head
   let fightTime = 0;           // T27b: seconds since the fight began
-  let guestLastCount = -1;     // guest countdown beeps
-  let events = { bite: 0, trap: 0, eat: 0, round: 0 }; // host counters
+  let guestLastCount = -1;     // countdown beeps
   let guestEvents = { bite: 0, trap: 0, eat: 0, round: 0 };
   let netBound = false;
+  let snapAge = 0;             // секунд с последнего снапшота: и
+                              // голодание, и таймаут ухода соперника
 
-  /* flood fill scratch (typed arrays, one allocation per match) */
-  let blocked = null;          // Uint8Array: both bodies
-  let seen = null;             // Int32Array: generation stamps
-  let queueBuf = null;         // Int32Array: BFS queue
-  let stamp = 0;
+  /* ---------- неткод v2 ---------- */
+
+  let clock = { tick: 0, acc: 0, rate: 1, run: false }; // локальный таймлайн
+  let pred = null;             // предсказание СВОЕЙ змейки (fight)
+  let inputSeq = 0;            // счётчик своих входов
+  let inputLog = [];           // [{seq, tick, dirName}] — для реплея
+  let snapBuf = [];            // соперник: [{tk, pts[{x,y}], dir}] по tk
+  let arenaInfo = null;        // снапшотное {k,s,e} секрета арены
+  let lastTk = -1;             // tk последнего применённого снапшота
+  let mySq = 0;                // последний подтверждённый seq
+  let delayTicks = LEAD_DEFAULT; // интерполяционная задержка, тиков
+  let offRows = [];            // гаснущие визуальные смещения [{x,y}]
+  let offMag = 0;              // QA: суммарная величина смещения
+  let pingMs = 0;              // оценка RTT по меткам времени
+  let pingKnown = false;
+  let offSamples = [];         // arrive−st, окно для минимума
 
   /* ---------- helpers ---------- */
-
-  function idx(x, y) { return y * GW + x; }
 
   function tr(key, a, b) {
     let s = key;
@@ -251,13 +282,15 @@
     return { segs: segs, dir: dir, queue: [], growth: 0, pass: 0 };
   }
 
-  /* buffer of 1, latest valid turn wins; no repeats, no 180s */
+  /* буфер поворотов — точное зеркало серверного (duel-core.js):
+     FIFO до 3, повторы/развороты игнорируются, переполнение
+     выталкивает старый (новый важнее) */
   function queueTurn(s, d) {
     const last = s.queue.length ? s.queue[s.queue.length - 1] : s.dir;
     if (d.x === last.x && d.y === last.y) return;
     if (d.x === -last.x && d.y === -last.y) return;
-    if (s.queue.length >= TURN_BUFFER) s.queue[s.queue.length - 1] = d;
-    else s.queue.push(d);
+    if (s.queue.length >= TURN_BUFFER) s.queue.shift();
+    s.queue.push(d);
   }
 
   function takeTurn(s) {
@@ -296,21 +329,43 @@
     }
   }
 
-  /* own body collision AFTER the move: the freeing tail cell is
-     already vacated, so any coincidence here is a real crash */
-  function selfCrash(s) {
-    const head = s.segs[0].curr;
-    for (let i = 1; i < s.segs.length; i++) {
-      if (s.segs[i].curr.x === head.x && s.segs[i].curr.y === head.y) return true;
+  function cloneSnake(s) {
+    const segs = [];
+    for (let i = 0; i < s.segs.length; i++) {
+      segs.push({
+        prev: { x: s.segs[i].prev.x, y: s.segs[i].prev.y },
+        curr: { x: s.segs[i].curr.x, y: s.segs[i].curr.y }
+      });
     }
-    return false;
+    return { segs: segs, dir: s.dir, queue: [], growth: s.growth, pass: s.pass };
   }
 
-  /* ---------- food ---------- */
+  /* интерполированная позиция сегмента i на доле тика t */
+  function segAt(s, i, t) {
+    const sg = s.segs[Math.min(Math.max(i, 0), s.segs.length - 1)];
+    return {
+      x: sg.prev.x + (sg.curr.x - sg.prev.x) * t,
+      y: sg.prev.y + (sg.curr.y - sg.prev.y) * t
+    };
+  }
+
+  /* совпадает ли логика двух змеек (позиции/длина/направление) */
+  function snakeSame(a, b) {
+    if (!a || !b || a.segs.length !== b.segs.length) return false;
+    if (a.dir !== b.dir && (a.dir.x !== b.dir.x || a.dir.y !== b.dir.y)) return false;
+    for (let i = 0; i < a.segs.length; i++) {
+      if (a.segs[i].curr.x !== b.segs[i].curr.x ||
+          a.segs[i].curr.y !== b.segs[i].curr.y) return false;
+    }
+    return true;
+  }
+
+  /* ---------- food (локальный превью до первого снапшота) ---------- */
 
   function occupiedSet() {
     const occ = {};
     for (let i = 0; i < 2; i++) {
+      if (!snakes[i]) continue;
       const segs = snakes[i].segs;
       for (let k = 0; k < segs.length; k++) occ[idx(segs[k].curr.x, segs[k].curr.y)] = 1;
     }
@@ -339,290 +394,214 @@
     }
   }
 
-  function eatFood(s) {
-    const head = s.segs[0].curr;
+  /* ---------- неткод v2: таймлайн, предсказание, реплей ---------- */
+
+  function idx(x, y) { return y * GW + x; }
+
+  /* СЕКРЕТ АРЕНЫ (SPEC §14/§22): зеркало серверной маски duel-core.js —
+     математика 1:1, менять только парой. Тиковая детерминированность =
+     точное предсказание; для РЕНДЕРА тик дробный (плавная граница) */
+  const ARENA_IN_TICKS = 16;
+  const ARENA_OUT_TICKS = 10;
+
+  function arenaK(tick) {
+    if (!arenaInfo || tick <= arenaInfo.s || tick >= arenaInfo.e) return 0;
+    if (tick < arenaInfo.s + ARENA_IN_TICKS) return (tick - arenaInfo.s) / ARENA_IN_TICKS;
+    if (tick > arenaInfo.e - ARENA_OUT_TICKS) return (arenaInfo.e - tick) / ARENA_OUT_TICKS;
+    return 1;
+  }
+
+  function arenaOkC(x, y, tick) {
+    if (!arenaInfo) return true;
+    const k = arenaK(tick);
+    if (k <= 0) return true;
+    const px = x + 0.5, py = y + 0.5;
+    const cx = GW / 2, cy = GH / 2;
+    if (arenaInfo.k === 'circle') {
+      const rFull = Math.sqrt(cx * cx + cy * cy);
+      const r = rFull - (rFull - Math.max(cx, cy) * 0.74) * k;
+      const dx = px - cx, dy = py - cy;
+      return dx * dx + dy * dy <= r * r;
+    }
+    const m = Math.min(GW, GH) * 0.12 *
+      Math.sin((tick - arenaInfo.s) / (arenaInfo.e - arenaInfo.s) * Math.PI);
+    return px > m && px < GW - m && py > m && py < GH - m;
+  }
+
+  /* опережение сервера: oneWay + 1 тик — вход, отправленный сейчас,
+     успевает к тику своего применения (см. шапку) */
+  function leadTarget() {
+    if (!pingKnown) return LEAD_DEFAULT;
+    const oneWayTicks = (pingMs / 2 / 1000) / TICK_STEP;
+    return Math.max(LEAD_MIN, Math.min(LEAD_MAX, oneWayTicks + 1));
+  }
+
+  /* локальный тик предсказания: чистое движение своей змейки + еда;
+     столкновения/укусы/раунды — только сервер */
+  function predTick() {
+    if (!pred || !pred.segs.length) return;
+    takeTurn(pred);
+    const h = pred.segs[0];
+    const nx = h.curr.x + pred.dir.x;
+    const ny = h.curr.y + pred.dir.y;
+    if (nx < 0 || nx >= GW || ny < 0 || ny >= GH || !arenaOkC(nx, ny, clock.tick)) {
+      // стена (граница или секрет-арена) — вердикт за сервером:
+      // предсказание замирает у края
+      return;
+    }
+    moveSnake(pred, { x: nx, y: ny });
     for (let i = food.length - 1; i >= 0; i--) {
-      if (food[i].x === head.x && food[i].y === head.y) {
+      if (food[i].x === nx && food[i].y === ny) {
         food.splice(i, 1);
-        s.growth += FOOD_GROW;
-        fx('burst', head.x * CELL + CELL / 2, head.y * CELL + CELL / 2, '#ff2bd6', 7);
+        pred.growth += FOOD_GROW;
+        fx('burst', nx * CELL + CELL / 2, ny * CELL + CELL / 2, '#ff2bd6', 7);
         sfx('eat');
         haptic('click');
       }
     }
   }
 
-  /* the bite leftovers: ceil(2*dropped/3) cells, max 12, spread
-     over the dropped cells; the field cap trims the oldest */
-  function dropFood(cells) {
-    if (!cells.length) return;
-    const n = Math.min(FOOD_CUT_MAX, Math.ceil(cells.length * 2 / FOOD_PER_CUT));
-    for (let i = 0; i < n; i++) {
-      const c = cells[Math.floor(i * cells.length / n)];
-      let dup = false;
-      for (let k = 0; k < food.length; k++) {
-        if (food[k].x === c.x && food[k].y === c.y) { dup = true; break; }
+  /* RECONCILIATION: реплей неподтверждённых входов от авторитарного
+     состояния (тик tk) до текущего локального тика. Еда — из ТОГО ЖЕ
+     снапшота (локальный список уже потрёб predicted-съеданиями —
+     реплей обязан повторить путь сервера, а не клиента). Совпало —
+     не трогаем змейку (якоря интерполяции живут). Расхождение —
+     новая логика + гаснущее визуальное смещение вместо телепорта */
+  function reconcile(tk, sq, snapFood) {
+    if (sq > mySq) mySq = sq;
+    // подтверждённые входы больше не нужны
+    while (inputLog.length && inputLog[0].seq <= mySq) inputLog.shift();
+
+    const base = snakes[myIndex];
+    if (!base) return;
+    const sim = cloneSnake(base);
+
+    const unacked = [];
+    for (let i = 0; i < inputLog.length; i++) {
+      if (inputLog[i].seq > mySq) unacked.push(inputLog[i]);
+    }
+    const simFood = (snapFood || food).slice();
+    let qi = 0;
+    for (let t = tk + 1; t <= clock.tick; t++) {
+      while (qi < unacked.length && unacked[qi].tick <= t) {
+        queueTurn(sim, DIR[unacked[qi].dir] || sim.dir);
+        qi++;
       }
-      if (!dup) food.push({ x: c.x, y: c.y });
-    }
-    while (food.length > FOOD_TOTAL_MAX) food.shift();
-  }
-
-  /* ---------- trap detection (flood fill, typed arrays) ---------- */
-
-  function allocFlood() {
-    const n = GW * GH;
-    blocked = new Uint8Array(n);
-    seen = new Int32Array(n);
-    queueBuf = new Int32Array(n);
-    stamp = 0;
-  }
-
-  function markBlocked() {
-    blocked.fill(0);
-    for (let i = 0; i < 2; i++) {
-      const segs = snakes[i].segs;
-      for (let k = 0; k < segs.length; k++) {
-        blocked[idx(segs[k].curr.x, segs[k].curr.y)] = 1;
-      }
-    }
-  }
-
-  /* reachable free cells (food counts as passable) from a head */
-  function reachCount(s) {
-    const head = s.segs[0].curr;
-    const start = idx(head.x, head.y);
-    stamp++;
-    let qh = 0;
-    let qt = 0;
-    seen[start] = stamp;
-    queueBuf[qt++] = start;
-    let count = 0;
-    while (qh < qt) {
-      const c = queueBuf[qh++];
-      count++;
-      const cx = c % GW;
-      const cy = (c - cx) / GW;
-      if (cx > 0) { const n = c - 1; if (!blocked[n] && seen[n] !== stamp) { seen[n] = stamp; queueBuf[qt++] = n; } }
-      if (cx < GW - 1) { const n = c + 1; if (!blocked[n] && seen[n] !== stamp) { seen[n] = stamp; queueBuf[qt++] = n; } }
-      if (cy > 0) { const n = c - GW; if (!blocked[n] && seen[n] !== stamp) { seen[n] = stamp; queueBuf[qt++] = n; } }
-      if (cy < GH - 1) { const n = c + GW; if (!blocked[n] && seen[n] !== stamp) { seen[n] = stamp; queueBuf[qt++] = n; } }
-    }
-    return count;
-  }
-
-  function trapCheck() {
-    markBlocked();
-    const r0 = reachCount(snakes[0]);
-    const r1 = reachCount(snakes[1]);
-    const t0 = r0 < snakes[0].segs.length + snakes[0].growth + TRAP_MARGIN;
-    const t1 = r1 < snakes[1].segs.length + snakes[1].growth + TRAP_MARGIN;
-    if (t0 && t1) return r0 === r1 ? -1 : (r0 < r1 ? 1 : 0);
-    if (t0) return 1;
-    if (t1) return 0;
-    return null;
-  }
-
-  /* ---------- the tick (host authority, both snakes) ---------- */
-
-  function targetOf(s) {
-    const h = s.segs[0].curr;
-    return { x: h.x + s.dir.x, y: h.y + s.dir.y };
-  }
-
-  /* returns 'devoured' | 'bite' | null; cuts the rival on contact */
-  function biteCheck(me, foe) {
-    if (me.pass > 0) return null; // riding through the body
-    const head = me.segs[0].curr;
-    for (let k = 1; k < foe.segs.length; k++) {
-      const c = foe.segs[k].curr;
-      if (c.x !== head.x || c.y !== head.y) continue;
-      const dropped = [];
-      const foeSide = sideOf(foe);
-      for (let s = k; s < foe.segs.length; s++) {
-        dropped.push({ x: foe.segs[s].curr.x, y: foe.segs[s].curr.y });
-        fx('burst', foe.segs[s].curr.x * CELL + CELL / 2, foe.segs[s].curr.y * CELL + CELL / 2,
-          sideColor(foeSide, s, foe.segs.length), 6);
-      }
-      foe.segs.length = k;   // everything from the bite point falls off
-      foe.growth = 0;
-      dropFood(dropped);
-      me.pass = BITE_PASS_TIME;
-      events.bite++;
-      fx('glitch', 0.2);
-      fx('shake', 5);
-      sfx('duelBite');
-      haptic('heavy');
-      return foe.segs.length < BITE_MIN_KEEP ? 'devoured' : 'bite';
-    }
-    return null;
-  }
-
-  /* which arena side (0|1) a snake object belongs to */
-  function sideOf(s) {
-    return snakes[0] === s ? 0 : 1;
-  }
-
-  function endRound(winner, key) {
-    if (winner === 0 || winner === 1) score[winner]++;
-    roundWinner = winner;
-    phase = 'roundEnd';
-    phaseTimer = ROUNDEND_TIME;
-    events.round++;
-    setBanner(key, ROUNDEND_TIME + 0.6,
-      winner === -1 ? '#ffe600' : sideColor(winner, 0, 1));
-    const loser = winner === -1 ? null : 1 - winner;
-    for (let i = 0; i < 2; i++) {
-      const h = snakes[i].segs[0].curr;
-      if (i === winner) fx('burst', h.x * CELL + CELL / 2, h.y * CELL + CELL / 2, '#00ff9d', 18);
-      else if (i === loser) fx('burst', h.x * CELL + CELL / 2, h.y * CELL + CELL / 2, '#ff2d55', 16);
-    }
-    netSend('round', { w: winner, r: round, s: [score[0], score[1]], k: key });
-  }
-
-  function trapWin(winner) {
-    slowmo = TRAP_SLOWMO;
-    events.trap++;
-    fx('flash', '#ff2d55', 0.18);
-    sfx('duelTrap');
-    endRound(winner, 'dTrapped');
-  }
-
-  function tick() {
-    const s0 = snakes[0];
-    const s1 = snakes[1];
-    takeTurn(s0);
-    takeTurn(s1);
-
-    const t0 = targetOf(s0);
-    const t1 = targetOf(s1);
-    const wall = [false, false];
-    if (t0.x < 0 || t0.x >= GW || t0.y < 0 || t0.y >= GH) wall[0] = true;
-    if (t1.x < 0 || t1.x >= GW || t1.y < 0 || t1.y >= GH) wall[1] = true;
-    if (wall[0] || wall[1]) {
-      endRound(wall[0] && wall[1] ? -1 : (wall[0] ? 1 : 0), 'dCrash');
-      return;
-    }
-
-    /* head-on: same target cell, or a cell swap in one tick */
-    const h0 = s0.segs[0].curr;
-    const h1 = s1.segs[0].curr;
-    const sameCell = t0.x === t1.x && t0.y === t1.y;
-    const swap = t0.x === h1.x && t0.y === h1.y && t1.x === h0.x && t1.y === h0.y;
-    if (sameCell || swap) {
-      const l0 = s0.segs.length + s0.growth;
-      const l1 = s1.segs.length + s1.growth;
-      fx('glitch', 0.25);
-      fx('shake', 8);
-      endRound(l0 === l1 ? -1 : (l0 > l1 ? 0 : 1), 'dHead');
-      return;
-    }
-
-    /* both move simultaneously, then the bodies resolve */
-    moveSnake(s0, t0);
-    moveSnake(s1, t1);
-
-    const dead = [selfCrash(s0), selfCrash(s1)];
-    let devoured = false;
-    for (let i = 0; i < 2; i++) {
-      if (dead[0] || dead[1]) break; // a crash already decided it
-      const me = snakes[i];
-      const foe = snakes[1 - i];
-      const r = biteCheck(me, foe);
-      if (r === 'devoured') {
-        dead[1 - i] = true;
-        devoured = true;
-      }
-    }
-    if (!dead[0] && !dead[1]) {
-      eatFood(s0);
-      eatFood(s1);
-      maintainFood();
-    }
-    if (dead[0] || dead[1]) {
-      if (dead[0] && dead[1]) endRound(-1, 'dDraw');
-      else {
-        const winner = dead[0] ? 1 : 0;
-        if (devoured) {
-          events.eat++;
-          sfx('duelWin'); // a round eaten is a small fanfare
-        } else {
-          fx('shake', 7);
+      takeTurn(sim);
+      const h = sim.segs[0];
+      const nx = h.curr.x + sim.dir.x;
+      const ny = h.curr.y + sim.dir.y;
+      if (nx < 0 || nx >= GW || ny < 0 || ny >= GH || !arenaOkC(nx, ny, t)) break;
+      moveSnake(sim, { x: nx, y: ny });
+      for (let i = simFood.length - 1; i >= 0; i--) {
+        if (simFood[i].x === nx && simFood[i].y === ny) {
+          simFood.splice(i, 1);
+          sim.growth += FOOD_GROW;
         }
-        endRound(winner, devoured ? 'dEat' : 'dCrash');
       }
+    }
+    /* входы с тегом БУДУЩИХ тиков реплей не затронул — вернём их в
+       очередь: замена pred не имеет права терять ещё не применённые
+       повороты (иначе живое предсказание пропускает ход) */
+    for (; qi < unacked.length; qi++) {
+      queueTurn(sim, DIR[unacked[qi].dir] || sim.dir);
+    }
+
+    if (snakeSame(pred, sim)) {
+      pred.growth = sim.growth; // рост мог уточниться — позиции те же
+      pred.dir = sim.dir;
+      pred.pass = sim.pass;
       return;
     }
 
-    const trap = trapCheck();
-    if (trap !== null) trapWin(trap);
+    /* расхождение: смещение от ОТРИСОВАННОЙ позиции к новой логике */
+    const start = rowsBetween(pred, sim);
+    pred = sim;
+    /* порог прыжка — в среднем НА СЕГМЕНТ (mag — сумма по всем) */
+    offRows = start.mag > SNAP_CELLS * Math.max(1, start.n) ? [] : start.rows;
+    offMag = offRows.length ? start.mag : 0;
   }
 
-  /* ---------- match flow ---------- */
-
-  function startRound() {
-    const y = Math.floor(GH / 2);
-    const x0 = Math.max(START_LEN, Math.min(GW - START_LEN - 1, Math.round(GW * START_X0)));
-    const x1 = Math.max(START_LEN, Math.min(GW - START_LEN - 1, Math.round(GW * START_X1)));
-    snakes = [
-      makeSnake(x0, y, DIR.right, START_LEN),
-      makeSnake(x1, y, DIR.left, START_LEN)
-    ];
-    food = [];
-    maintainFood();
-    tickTimer = 0;
-    slowmo = 0;
-    roundWinner = null;
-    phase = 'countdown';
-    phaseTimer = COUNTDOWN_TIME;
-    lastCount = -1;
-  }
-
-  function nextAfterRoundEnd() {
-    if (score[0] >= MATCH_WINS || score[1] >= MATCH_WINS || round >= MATCH_ROUNDS) {
-      matchEnd(score[0] === score[1] ? -1 : (score[0] > score[1] ? 0 : 1));
-      return;
+  /* векторы смещения от ОТОБРАЖАЕМОЙ позы a (логика + ещё не погашенное
+     смещение!) к позе b — цепляем визуальный долг, иначе каждая
+    -refresh-коррекция роняла бы его и давала прыжок */
+  function rowsBetween(a, b) {
+    const t = Math.min(1, clock.acc / TICK_STEP);
+    const rows = [];
+    const n = Math.max(a.segs.length, b.segs.length);
+    let mag = 0;
+    for (let i = 0; i < n; i++) {
+      const pa = segAt(a, i, t);
+      const off = offRows[i];
+      const ax = pa.x + (off ? off.x : 0);
+      const ay = pa.y + (off ? off.y : 0);
+      const pb = segAt(b, i, t);
+      let dx = ax - pb.x;
+      let dy = ay - pb.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len > ERR_CAP) {
+        const s = ERR_CAP / len;
+        dx *= s;
+        dy *= s;
+      }
+      mag += Math.abs(dx) + Math.abs(dy);
+      rows.push({ x: dx, y: dy });
     }
-    round++;
-    startRound();
+    return { rows: rows, mag: mag, n: n };
   }
 
-  function matchEnd(winner) {
-    phase = 'matchEnd';
-    const result = winner === -1 ? 'draw' : (winner === myIndex ? 'win' : 'loss');
-    setBanner(result === 'win' ? 'dWin' : (result === 'loss' ? 'dLose' : 'dDraw'), 999,
-      result === 'win' ? '#00ff9d' : (result === 'loss' ? '#ff2d55' : '#ffe600'));
-    sfx(result === 'win' ? 'duelWin' : 'duelLose');
-    haptic(result === 'win' ? 'success' : 'error');
-    if (result === 'win') fx('flash', '#00ff9d', 0.25);
-    netSend('win', { side: winner, s: [score[0], score[1]] });
-    finishMatch(result);
+  /* экспоненциальное гашение визуального смещения; темп — по
+     СРЕДНЕЙ величине на сегмент: большой догон после тишины гасится
+     дольше — змейка видимо ускоряется к правде, а не телепортируется */
+  function decayOff(dt) {
+    if (!offRows.length) return;
+    let mag = 0;
+    for (let i = 0; i < offRows.length; i++) {
+      mag += Math.abs(offRows[i].x) + Math.abs(offRows[i].y);
+    }
+    const avg = mag / Math.max(1, offRows.length);
+    const tau = ERR_DECAY * (1 + Math.min(3, avg / 4));
+    const k = Math.exp(-dt / tau);
+    mag = 0;
+    for (let i = 0; i < offRows.length; i++) {
+      offRows[i].x *= k;
+      offRows[i].y *= k;
+      mag += Math.abs(offRows[i].x) + Math.abs(offRows[i].y);
+    }
+    if (mag < 0.05) {
+      offRows = [];
+      mag = 0;
+    }
+    offMag = mag;
   }
 
-  function finishMatch(result) {
-    if (matchEnded) return;
-    matchEnded = true;
-    if (typeof onMatchEndCb === 'function') {
-      try {
-        onMatchEndCb({ result: result, score: [score[0], score[1]] });
-      } catch (e) {
-        /* the caller's callback is the caller's problem */
+  /* буфер снапшотов соперника: вставка/замена по tk, сортировка */
+  function upsertFoeSnap(tk) {
+    const s = snakes[foeIndex];
+    if (!s || !s.segs.length) return;
+    const pts = [];
+    for (let i = 0; i < s.segs.length; i++) {
+      pts.push({ x: s.segs[i].curr.x, y: s.segs[i].curr.y });
+    }
+    const entry = { tk: tk, pts: pts, dir: dirIndex(s.dir) };
+    for (let i = 0; i < snapBuf.length; i++) {
+      if (snapBuf[i].tk === tk) {
+        snapBuf[i] = entry;
+        return;
+      }
+      if (snapBuf[i].tk > tk) {
+        snapBuf.splice(i, 0, entry);
+        break;
+      }
+      if (i === snapBuf.length - 1) {
+        snapBuf.push(entry);
+        break;
       }
     }
-  }
-
-  /* guest: no state snapshots for STATE_TIMEOUT seconds */
-  function rivalLeft() {
-    if (phase === 'matchEnd') return;
-    phase = 'matchEnd';
-    setBanner('dLeft', 999, '#ff2d55');
-    sfx('duelLose');
-    fx('glitch', 0.4);
-    finishMatch('aborted');
-  }
-
-  function setBanner(key, t, color) {
-    banner = { key: key, t: t, total: t, color: color || '#00f0ff' };
+    if (!snapBuf.length) snapBuf.push(entry);
+    while (snapBuf.length > SNAP_BUF_MAX) snapBuf.shift();
+    const cut = lastTk - SNAP_BUF_MAX;
+    while (snapBuf.length && snapBuf[0].tk < cut) snapBuf.shift();
   }
 
   /* ---------- networking ---------- */
@@ -635,54 +614,18 @@
         CS.Net.onMessage(onNetMsg);
       }
     } catch (e) {
-      /* no transport: an offline host simulates alone */
+      /* no transport: offline preview only */
     }
   }
 
   function onNetMsg(type, data) {
     if (!live) return;
-    if (host) {
-      if (type === 'turn') applyFoeTurn(data);
-      return;
-    }
     if (type === 'state') applySnapshot(data);
     else if (type === 'round') applyRoundMsg(data);
     else if (type === 'win') applyWinMsg(data);
   }
 
-  function applyFoeTurn(data) {
-    if (!data || typeof data !== 'object') return;
-    const d = normDir(data.dir);
-    if (d && snakes[foeIndex]) queueTurn(snakes[foeIndex], d);
-  }
-
-  function packSnake(s) {
-    const out = [];
-    for (let i = 0; i < s.segs.length; i++) {
-      out.push(s.segs[i].curr.x, s.segs[i].curr.y);
-    }
-    return out;
-  }
-
-  function sendState() {
-    if (!host) return;
-    netSend('state', {
-      ph: phase,
-      r: round,
-      s: [score[0], score[1]],
-      pt: Math.max(0, phaseTimer),
-      sn: [packSnake(snakes[0]), packSnake(snakes[1])],
-      d: [dirIndex(snakes[0].dir), dirIndex(snakes[1].dir)],
-      f: food.map(function (c) { return [c.x, c.y]; }),
-      w: roundWinner,
-      k: banner ? banner.key : null,
-      kt: banner ? Math.max(0, banner.t) : 0,
-      kc: banner ? banner.color : null,
-      ev: [events.bite, events.trap, events.eat, events.round]
-    });
-  }
-
-  function unpackSnake(flat, prevHead) {
+  function unpackSnake(flat, growth) {
     const segs = [];
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const x = flat[i];
@@ -694,84 +637,58 @@
       });
     }
     if (!segs.length) return null;
-    if (prevHead) {
-      segs[0].prev.x = prevHead.x; // head lerp anchor
-      segs[0].prev.y = prevHead.y;
-    }
-    return { segs: segs, dir: DIR.right, queue: [], growth: 0, pass: 0 };
+    return {
+      segs: segs, dir: DIR.right, queue: [],
+      growth: Number.isFinite(growth) ? growth : 0, pass: 0
+    };
   }
 
-  /* T27: advance the predicted own snake by one local tick — pure
-     movement, no authority: collisions/food/rounds stay with the host */
-  function predTick() {
-    if (!pred || !pred.segs.length) return;
-    const h = pred.segs[0];
-    predPrevHead = { x: h.curr.x, y: h.curr.y };
-    takeTurn(pred);
-    const nx = h.curr.x + pred.dir.x;
-    const ny = h.curr.y + pred.dir.y;
-    if (nx < 0 || nx >= GW || ny < 0 || ny >= GH) {
-      // T27fix: the wall is the host's verdict — the prediction freezes
-      // at the border instead of visually sliding through it
-      predTrail.length = 0;
-      return;
-    }
-    moveSnake(pred, { x: nx, y: ny });
-    predTrail.push(pred.segs[0].curr.x + ',' + pred.segs[0].curr.y);
-    if (predTrail.length > 4) predTrail.shift();
-  }
-
-  /* T27: keep the prediction when the host merely lags my in-flight
-     input (head adjacent / exactly one tick behind); adopt the host
-     truth on real divergence or a length change (food, bites) */
-  function cloneSnake(s) {
-    const segs = [];
-    for (let i = 0; i < s.segs.length; i++) {
-      segs.push({
-        prev: { x: s.segs[i].prev.x, y: s.segs[i].prev.y },
-        curr: { x: s.segs[i].curr.x, y: s.segs[i].curr.y }
-      });
-    }
-    return { segs: segs, dir: s.dir, queue: [], growth: 0, pass: s.pass };
-  }
-
-  function reconcilePred(snap) {
-    if (!pred || phase !== 'fight') {
-      pred = cloneSnake(snap);
-      predTimer = 0;
-      return;
-    }
-    const ph = pred.segs[0].curr;
-    const sh = snap.segs[0].curr;
-    const manh = Math.abs(ph.x - sh.x) + Math.abs(ph.y - sh.y);
-    // the host is 1-2 ticks behind my in-flight input: its head sits on
-    // MY recent path — that is consistency, not divergence
-    const onTrail = predTrail.indexOf(sh.x + ',' + sh.y) !== -1 ||
-      (predPrevHead && predPrevHead.x === sh.x && predPrevHead.y === sh.y);
-    if ((manh <= 1 || onTrail) && snap.segs.length === pred.segs.length) {
-      pred.pass = snap.pass; // mirror the pass-through shield timer
-      return;
-    }
-    pred = cloneSnake(snap);
-    predTimer = 0;
-    predTrail = [];
+  /* новый раунд: таймлайн и история входов начинаются с чистого
+     листа (сервер тоже сбрасывает тики и подтверждения) */
+  function resetRoundNet() {
+    pred = null;
+    clock = { tick: 0, acc: 0, rate: 1, run: false };
+    inputLog = [];
+    snapBuf = [];
+    lastTk = -1;
+    mySq = 0;
+    offRows = [];
+    offMag = 0;
+    arenaInfo = null; // новый раунд — арена с чистого листа
   }
 
   function applySnapshot(d) {
     if (!d || typeof d !== 'object' || !Array.isArray(d.sn)) return;
-    netStateAge = 0;
     snapAge = 0;
+    const arrive = Date.now();
     const prevPhase = phase;
+
+    /* оценка one-way: смещение часов = arrive − st; минимум за окно
+       ≈ чистая задержка пересылки; пинг = 2 × one-way (T27.3) */
+    if (Number.isFinite(d.st)) {
+      offSamples.push(arrive - d.st);
+      if (offSamples.length > PING_WINDOW) offSamples.shift();
+      let mn = offSamples[0];
+      for (let i = 1; i < offSamples.length; i++) {
+        if (offSamples[i] < mn) mn = offSamples[i];
+      }
+      const oneWay = Math.max(0, (arrive - d.st) - mn);
+      const rtt = 2 * oneWay;
+      pingMs = pingKnown ? pingMs * 0.8 + rtt * 0.2 : rtt;
+      pingKnown = true;
+    }
+
+    /* авторитарные змейки */
     for (let i = 0; i < 2; i++) {
-      const prevHead = snakes[i] && snakes[i].segs.length
-        ? { x: snakes[i].segs[0].curr.x, y: snakes[i].segs[0].curr.y }
-        : null;
-      const s = unpackSnake(d.sn[i], prevHead);
+      const s = unpackSnake(d.sn[i], d.g ? d.g[i] : 0);
       if (s) {
-        s.dir = DIR_LIST[(d.d && Number.isFinite(d.d[i])) ? Math.max(0, Math.min(3, d.d[i])) : 0];
-        s.pass = snakes[i] ? snakes[i].pass : 0;
+        const di = d.d && Number.isFinite(d.d[i]) ? Math.max(0, Math.min(3, d.d[i])) : 0;
+        s.dir = DIR_LIST[di];
+        /* p — авторитарный таймер «щита» прохода сквозь тело (SPEC §22):
+           локально только затухает, обновляется снапшотом */
+        const pv = d.p && Number.isFinite(d.p[i]) ? d.p[i] : 0;
+        s.pass = Math.max(pv, snakes[i] ? snakes[i].pass : 0);
         snakes[i] = s;
-        if (i === myIndex && !host) reconcilePred(s);
       }
     }
     food = [];
@@ -790,11 +707,16 @@
     roundWinner = Number.isFinite(d.w) ? d.w : null;
     phase = typeof d.ph === 'string' ? d.ph : phase;
     if (Number.isFinite(d.pt)) phaseTimer = d.pt;
-    if (phase === 'countdown' || phase === 'roundEnd') {
-      pred = null;      // T27: a fresh round rebuilds the prediction
-      predTimer = 0;
-      predTrail = [];
-    }
+    /* секрет арены: снапшот — единственный источник правды */
+    arenaInfo = (d.ar && typeof d.ar.k === 'string' &&
+      Number.isFinite(d.ar.s) && Number.isFinite(d.ar.e))
+      ? { k: d.ar.k === 'circle' ? 'circle' : 'pulse', s: d.ar.s, e: d.ar.e }
+      : null;
+
+    /* вход в отсчёт (новый раунд): сетевой таймлайн с чистого листа.
+       Только на ПЕРЕХОДЕ — повороты, нажатые во время отсчёта,
+       не должны стираться следующим countdown-снапшотом */
+    if (phase === 'countdown' && prevPhase !== 'countdown') resetRoundNet();
     if (phase === 'fight' && prevPhase !== 'fight') fightTime = 0; // T27b
 
     /* local countdown beeps + the fight tone */
@@ -843,6 +765,44 @@
       if (ev.round > guestEvents.round) guestEvents.round = ev.round;
       if (ev.eat > guestEvents.eat) guestEvents.eat = ev.eat;
     }
+
+    /* неткод v2: тики, буфер соперника, reconciliation */
+    const tk = Number.isFinite(d.tk) ? (d.tk | 0) : -1;
+    if (tk < 0) return;
+
+    if (phase === 'fight') {
+      if (!pred) {
+        /* первый боевой снапшот раунда: таймлайн стартует СРАЗУ с
+           положенным опережением сервера (lead) — иначе полторы
+           секунды догонa делают каждый вход опоздавшим; входы,
+           нажатые во время отсчёта, реплей применит на тике 1 */
+        clock.tick = tk + Math.round(leadTarget());
+        clock.acc = 0;
+        clock.rate = 1;
+        clock.run = true;
+        pred = cloneSnake(snakes[myIndex]);
+        lastTk = tk;
+        upsertFoeSnap(tk);
+        reconcile(tk, Array.isArray(d.sq) ? d.sq[myIndex] : 0, food);
+        return;
+      }
+      if (tk < lastTk) return; // устаревший снапшот (после бёрста)
+      lastTk = tk;
+      upsertFoeSnap(tk);
+      if (!clock.run && tk - clock.tick > RESYNC_JUMP) {
+        /* вернулись после долгой тишины: сервер ушёл далеко —
+           перезапускаем таймлайн у его настоящего тика (с опережением);
+           pred НЕ трогаем — reconcile посчитает смещение от показанной
+           позиции и плавно догонит (без телепорта) */
+        clock.tick = tk + Math.round(leadTarget());
+        clock.acc = 0;
+      }
+      clock.run = true;
+      reconcile(tk, Array.isArray(d.sq) ? d.sq[myIndex] : 0, food);
+    } else {
+      lastTk = Math.max(lastTk, tk);
+      upsertFoeSnap(tk);
+    }
   }
 
   function applyRoundMsg(d) {
@@ -852,6 +812,7 @@
     }
     roundWinner = Number.isFinite(d.w) ? d.w : null;
     phase = 'roundEnd';
+    clock.run = false;
     if (typeof d.k === 'string' && d.k) {
       setBanner(d.k, ROUNDEND_TIME + 0.6,
         d.w === -1 || d.w === null || d.w === undefined ? '#ffe600' : sideColor(d.w, 0, 1));
@@ -865,11 +826,59 @@
     }
     const winner = Number.isFinite(d.side) ? d.side : -1;
     phase = 'matchEnd';
+    clock.run = false;
     const result = winner === -1 ? 'draw' : (winner === myIndex ? 'win' : 'loss');
     setBanner(result === 'win' ? 'dWin' : (result === 'loss' ? 'dLose' : 'dDraw'), 999,
       result === 'win' ? '#00ff9d' : (result === 'loss' ? '#ff2d55' : '#ffe600'));
     sfx(result === 'win' ? 'duelWin' : 'duelLose');
     finishMatch(result);
+  }
+
+  /* ---------- match flow ---------- */
+
+  /* локальный превью-старт: фазы рисуются сразу, первый же снапшот
+     привозит авторитарную истину */
+  function startRound() {
+    const y = Math.floor(GH / 2);
+    const x0 = Math.max(START_LEN, Math.min(GW - START_LEN - 1, Math.round(GW * START_X0)));
+    const x1 = Math.max(START_LEN, Math.min(GW - START_LEN - 1, Math.round(GW * START_X1)));
+    snakes = [
+      makeSnake(x0, y, DIR.right, START_LEN),
+      makeSnake(x1, y, DIR.left, START_LEN)
+    ];
+    food = [];
+    maintainFood();
+    resetRoundNet();
+    roundWinner = null;
+    phase = 'countdown';
+    phaseTimer = COUNTDOWN_TIME;
+  }
+
+  function finishMatch(result) {
+    if (matchEnded) return;
+    matchEnded = true;
+    if (typeof onMatchEndCb === 'function') {
+      try {
+        onMatchEndCb({ result: result, score: [score[0], score[1]] });
+      } catch (e) {
+        /* the caller's callback is the caller's problem */
+      }
+    }
+  }
+
+  /* нет снапшотов STATE_TIMEOUT секунд — соперник ушёл */
+  function rivalLeft() {
+    if (phase === 'matchEnd') return;
+    phase = 'matchEnd';
+    clock.run = false;
+    setBanner('dLeft', 999, '#ff2d55');
+    sfx('duelLose');
+    fx('glitch', 0.4);
+    finishMatch('aborted');
+  }
+
+  function setBanner(key, t, color) {
+    banner = { key: key, t: t, total: t, color: color || '#00f0ff' };
   }
 
   /* ---------- update ---------- */
@@ -885,65 +894,177 @@
         snakes[i].pass = Math.max(0, snakes[i].pass - dt);
       }
     }
+    if (pred && pred.pass > 0) pred.pass = Math.max(0, pred.pass - dt);
     const slow = slowmo > 0 ? TRAP_SLOW_FACTOR : 1;
     if (slowmo > 0) slowmo = Math.max(0, slowmo - dt);
     snapAge += dt;
 
-    /* guest: a silent transport for STATE_TIMEOUT seconds = the
-       rival is gone (presence itself is the T24 ui's job) */
-    if (!host && phase !== 'matchEnd') {
-      netStateAge += dt;
-      if (netStateAge > STATE_TIMEOUT) rivalLeft();
-    }
+    /* тишина транспорта = соперник ушёл (presence — задача T24 ui) */
+    if (live && phase !== 'matchEnd' && snapAge > STATE_TIMEOUT) rivalLeft();
 
     if (phase === 'countdown') {
+      /* бипы отсчёта — только из applySnapshot (guestLastCount):
+         локальный дубль звучал дважды каждую секунду */
       phaseTimer -= dt;
-      const n = Math.ceil(phaseTimer);
-      if (n !== lastCount) {
-        lastCount = n;
-        if (n > 0) sfx('duelCount');
-      }
       if (phaseTimer <= 0) {
         phase = 'fight';
         phaseTimer = 0;
-        tickTimer = 0;
         fightTime = 0;
         setBanner('dReady', 0.8, '#00ff9d');
         sfx('duelGo');
       }
     } else if (phase === 'fight') {
       fightTime += dt; // T27b: identity label timings
-      if (host) {
-        tickTimer += dt * slow;
-        const step = 1 / TICK_RATE;
+
+      /* неткод v2: голодание — таймлайн замирает, чтобы после
+         бёрста снапшотов не лететь наперёд вслепую */
+      if (snapAge > STARVE_AFTER) clock.run = false;
+
+      if (clock.run && pred) {
+        clock.acc += dt * clock.rate;
         let guard = TICK_GUARD;
-        while (tickTimer >= step && guard-- > 0 && phase === 'fight') {
-          tickTimer -= step;
-          tick();
-        }
-      } else if (pred) {
-        // T27: the guest simulates its OWN snake locally — the turn shows
-        // up on the very next local tick, no network round trip involved
-        predTimer += dt * slow;
-        const step = 1 / TICK_RATE;
-        let guard = TICK_GUARD;
-        while (predTimer >= step && guard-- > 0 && phase === 'fight') {
-          predTimer -= step;
+        while (clock.acc >= TICK_STEP && guard-- > 0 && phase === 'fight') {
+          clock.acc -= TICK_STEP;
+          clock.tick++;
           predTick();
         }
+        if (clock.acc >= TICK_STEP) clock.acc = 0; // dt-спайк не копим
+
+        /* rate sync: локальный тик держит опережение leadTarget() над
+           ТЕКУЩИМ тиком сервера. Оценка сервера обязана учитывать
+           транзит снапшота (lastTk был истинен oneWay назад) — иначе
+           пила snapAge между доставками раскачивает регулятор, lead
+           схлопывается и входы опаздывают к своим тикам */
+        const oneWay = pingKnown ? pingMs / 2000 : 0.07;
+        const estSrv = lastTk + (snapAge + oneWay) / TICK_STEP;
+        const err = (clock.tick + clock.acc / TICK_STEP) - estSrv - leadTarget();
+        clock.rate = Math.max(RATE_MIN, Math.min(RATE_MAX, 1 - err * RATE_K));
+
+        /* адаптивная задержка интерполяции соперника: рендер-тик
+           отстаёт от последнего авторитарного на ~DELAY_TARGET */
+        const clockFloat = clock.tick + clock.acc / TICK_STEP;
+        const desired = clockFloat - (lastTk - DELAY_TARGET);
+        const dstep = Math.max(-DELAY_SPEED * dt, Math.min(DELAY_SPEED * dt, desired - delayTicks));
+        delayTicks = Math.max(DELAY_MIN, Math.min(DELAY_MAX, delayTicks + dstep));
       }
+
+      decayOff(dt);
     } else if (phase === 'roundEnd') {
       phaseTimer -= dt * slow;
-      if (host && phaseTimer <= 0) nextAfterRoundEnd();
     }
+  }
 
-    if (host && live) {
-      stateTimer += dt;
-      if (stateTimer >= STATE_INTERVAL) {
-        stateTimer = 0;
-        sendState();
-      }
+  /* ---------- арена: рендер-маска (SPEC §14) ---------- */
+
+  /* контур маски на ДРОБНОМ тике (рендертаймлайн) — плавная граница */
+  function arenaPathD(g, tickF) {
+    if (!arenaInfo) return false;
+    const k = arenaK(tickF);
+    if (k <= 0.01) return false;
+    const W = GW * CELL, H = GH * CELL;
+    const cx = W / 2, cy = H / 2;
+    const ccx = GW / 2, ccy = GH / 2;
+    g.beginPath();
+    if (arenaInfo.k === 'circle') {
+      const rFull = Math.sqrt(ccx * ccx + ccy * ccy);
+      const r = (rFull - (rFull - Math.max(ccx, ccy) * 0.74) * k) * CELL;
+      g.arc(cx, cy, Math.max(1, r), 0, Math.PI * 2);
+    } else {
+      const m = Math.min(GW, GH) * 0.12 *
+        Math.sin((tickF - arenaInfo.s) / (arenaInfo.e - arenaInfo.s) * Math.PI) * CELL;
+      g.rect(m, m, W - m * 2, H - m * 2);
     }
+    return true;
+  }
+
+  function arenaStrokeD(g, tickF) {
+    if (!arenaPathD(g, tickF)) return;
+    g.save();
+    g.strokeStyle = '#00f0ff';
+    g.lineWidth = 2;
+    g.shadowColor = '#00f0ff';
+    g.shadowBlur = 14;
+    g.stroke();
+    g.restore();
+  }
+
+  /* телеграф: до старта маски — пульсирующий контур БУДУЩЕЙ границы */
+  function arenaTelegraph(g, tickF) {
+    if (!arenaInfo || tickF >= arenaInfo.s || tickF < arenaInfo.s - 14) return;
+    const W = GW * CELL, H = GH * CELL;
+    const cx = W / 2, cy = H / 2;
+    const ccx = GW / 2, ccy = GH / 2;
+    const a = 0.18 + 0.22 * (0.5 + 0.5 * Math.sin(tickF * 2.2));
+    g.save();
+    g.globalAlpha = a;
+    g.strokeStyle = '#ffe600';
+    g.lineWidth = 2;
+    g.setLineDash([10, 8]);
+    g.beginPath();
+    if (arenaInfo.k === 'circle') {
+      const rFull = Math.sqrt(ccx * ccx + ccy * ccy);
+      const r = (rFull - (rFull - Math.max(ccx, ccy) * 0.74)) * CELL;
+      g.arc(cx, cy, Math.max(1, r), 0, Math.PI * 2);
+    } else {
+      const m = Math.min(GW, GH) * 0.12 * CELL;
+      g.rect(m, m, W - m * 2, H - m * 2);
+    }
+    g.stroke();
+    g.restore();
+  }
+
+  /* ---------- отрисовка поз (неткод v2) ---------- */
+
+  /* своя змейка: предсказание + гаснущее смещение расхождения */
+  function myPose() {
+    const s = pred || snakes[myIndex];
+    if (!s || !s.segs.length) return null;
+    const t = phase === 'fight' ? Math.min(1, clock.acc / TICK_STEP) : 1;
+    const pts = [];
+    for (let i = 0; i < s.segs.length; i++) {
+      const p = segAt(s, i, t);
+      const off = offRows[i];
+      pts.push(off ? { x: p.x + off.x, y: p.y + off.y } : p);
+    }
+    return { pts: pts, dir: s.dir, pass: s.pass };
+  }
+
+  /* соперник: интерполяция буфера снапшотов на отложенном таймлайне;
+     вне боя — статичная авторитарная поза */
+  function rivalPose() {
+    const s = snakes[foeIndex];
+    if (!s || !s.segs.length) return null;
+    if (phase !== 'fight' || snapBuf.length === 0) {
+      const pts = [];
+      for (let i = 0; i < s.segs.length; i++) {
+        pts.push({ x: s.segs[i].curr.x, y: s.segs[i].curr.y });
+      }
+      return { pts: pts, dir: s.dir, pass: s.pass };
+    }
+    /* страховка: рендер-тик никогда не заглядывает за последний
+       авторитарный тик (иначе пришлось бы рисовать будущее) */
+    let rt = clock.tick + clock.acc / TICK_STEP - delayTicks;
+    if (lastTk >= 0) rt = Math.min(rt, lastTk - 0.02);
+    let a = snapBuf[0];
+    let b = null;
+    for (let i = 0; i < snapBuf.length; i++) {
+      if (snapBuf[i].tk <= rt) a = snapBuf[i];
+      else { b = snapBuf[i]; break; }
+    }
+    const span = b ? Math.max(1, b.tk - a.tk) : 1;
+    const u = b ? Math.max(0, Math.min(1, (rt - a.tk) / span)) : 1;
+    const n = Math.max(a.pts.length, b ? b.pts.length : 0);
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const pa = a.pts[Math.min(i, a.pts.length - 1)];
+      const pb = b ? b.pts[Math.min(i, b.pts.length - 1)] : pa;
+      pts.push({ x: pa.x + (pb.x - pa.x) * u, y: pa.y + (pb.y - pa.y) * u });
+    }
+    return { pts: pts, dir: DIR_LIST[b ? b.dir : a.dir], pass: s.pass };
+  }
+
+  function sidePose(side) {
+    return side === myIndex ? myPose() : rivalPose();
   }
 
   /* ---------- drawing ---------- */
@@ -1052,12 +1173,10 @@
     g.textBaseline = 'bottom';
     for (let side = 0; side < 2; side++) {
       const mine = side === myIndex;
-      const usePred = mine && !host && pred && phase === 'fight';
-      const sn = usePred ? pred : snakes[side];
-      if (!sn || !sn.segs.length) continue;
-      const h = sn.segs[0].curr;
-      const x = h.x * CELL + CELL / 2;
-      const y = h.y * CELL - 4;
+      const pose = sidePose(side);
+      if (!pose || !pose.pts.length) continue;
+      const x = pose.pts[0].x * CELL + CELL / 2;
+      const y = pose.pts[0].y * CELL - 4;
       if (mine) {
         if (intro) {
           g.globalAlpha = 0.75 + 0.25 * Math.sin(animTime * 7);
@@ -1115,24 +1234,36 @@
     }
   }
 
+  /* T27.3: пинг в углу — зелёный <120, жёлтый <250, красный ≥250 */
+  function drawPing(g) {
+    if (!pingKnown || phase === 'countdown') return;
+    const n = Math.round(pingMs);
+    const color = n < 120 ? '#00ff9d' : (n < 250 ? '#ffe600' : '#ff2d55');
+    const W = GW * CELL;
+    const H = GH * CELL;
+    g.save();
+    g.font = '11px "Cascadia Mono", Consolas, monospace';
+    g.textAlign = 'right';
+    g.textBaseline = 'bottom';
+    g.globalAlpha = 0.85;
+    g.fillStyle = color;
+    g.shadowColor = color;
+    g.shadowBlur = 6;
+    g.fillText(tr('duelPing', n), W - 8, H - 6);
+    if (!clock.run) { // голодание: честная плашка
+      g.textAlign = 'left';
+      g.fillStyle = '#ffe600';
+      g.shadowColor = '#ffe600';
+      g.fillText(tr('duelNetWait'), 8, H - 6);
+    }
+    g.restore();
+  }
+
   function drawSnake(g, side) {
     const mine = side === myIndex;
-    // T27: the guest renders its OWN snake from the local prediction —
-    // turns appear on the next local tick instead of a network hop
-    const usePred = mine && !host && pred && phase === 'fight';
-    const s = usePred ? pred : snakes[side];
-    if (!s || !s.segs.length) return;
-    const n = s.segs.length;
-    let t;
-    if (host) {
-      t = Math.min(1, tickTimer * TICK_RATE);
-    } else if (usePred) {
-      t = Math.min(1, predTimer * TICK_RATE);
-    } else if (phase === 'fight') {
-      t = Math.min(1, snapAge / SNAP_LERP); // guest rival: head lerp
-    } else {
-      t = 1;
-    }
+    const pose = sidePose(side);
+    if (!pose || !pose.pts.length) return;
+    const n = pose.pts.length;
     let skinAlpha = 1;
     if (mine) {
       try {
@@ -1140,33 +1271,33 @@
       } catch (e) { skinAlpha = 1; }
     }
     for (let i = n - 1; i >= 0; i--) {
-      const sg = s.segs[i];
-      const x = (sg.prev.x + (sg.curr.x - sg.prev.x) * t) * CELL;
-      const y = (sg.prev.y + (sg.curr.y - sg.prev.y) * t) * CELL;
+      const x = pose.pts[i].x * CELL;
+      const y = pose.pts[i].y * CELL;
       const isHead = i === 0;
       const pad = isHead ? CELL * 0.06 : CELL * 0.07;
       g.save();
       g.fillStyle = sideColor(side, i, n);
-      if (s.pass > 0 && isHead) {
+      if (pose.pass > 0 && isHead) {
         /* riding through the rival's body: blink like a shield */
         g.globalAlpha = Math.max(0.15, 0.45 + 0.55 * Math.sin(animTime * 14));
       } else if (skinAlpha < 1 && mine) {
         g.globalAlpha = skinAlpha;
       }
       if (isHead) {
-        g.shadowColor = mine ? (CS.Skins && typeof CS.Skins.headGlow === 'function'
+        /* PERF: печённый LRU-спрайт вместо shadowBlur (как в соло);
+           радуга квантуется в skins.js — кэш не греется */
+        const glow = mine ? (CS.Skins && typeof CS.Skins.headGlow === 'function'
           ? CS.Skins.headGlow(animTime) : MY_GLOW) : RIVAL_GLOW;
-        g.shadowBlur = 16;
+        CS.FX.drawGlow(g, x + CELL / 2, y + CELL / 2, CELL * 2.6, CELL * 2.6, glow, 16);
       }
       roundRect(g, x + pad, y + pad, CELL - pad * 2, CELL - pad * 2, isHead ? 8 : 6);
       g.fill();
       if (isHead) {
-        g.shadowBlur = 0;
         g.fillStyle = BG;
-        const fxp = x + CELL / 2 + s.dir.x * CELL * 0.16;
-        const fyp = y + CELL / 2 + s.dir.y * CELL * 0.16;
-        const px = -s.dir.y;
-        const py = s.dir.x;
+        const fxp = x + CELL / 2 + pose.dir.x * CELL * 0.16;
+        const fyp = y + CELL / 2 + pose.dir.y * CELL * 0.16;
+        const px = -pose.dir.y;
+        const py = pose.dir.x;
         const off = CELL * 0.15;
         const r = Math.max(2, CELL * 0.08);
         g.beginPath();
@@ -1231,11 +1362,25 @@
     g.fillStyle = BG;
     g.fillRect(0, 0, W, H);
     drawArena(g);
+    /* SPEC §14: секрет арены — сцена в клипе маски на отложенном
+       рендер-таймлайне (тот же, что у соперника) */
+    const tickF = clock.tick + clock.acc / TICK_STEP - delayTicks;
+    const arMask = arenaPathD(g, tickF);
+    if (arMask) {
+      g.save();
+      g.clip();
+    }
     drawFoodCells(g);
     drawSnake(g, 0);
     drawSnake(g, 1);
+    if (arMask) {
+      g.restore();
+      arenaStrokeD(g, tickF);
+    }
+    arenaTelegraph(g, tickF);
     drawIdentity(g); // T27b: «YOU» + names during the countdown start
     drawHud(g);
+    drawPing(g);     // T27.3: пинг и честная плашка голодания
     drawBanner(g);
   }
 
@@ -1248,15 +1393,13 @@
       if (cfg && Number.isFinite(cfg.cell) && cfg.cell > 0) CELL = cfg.cell;
     },
 
-    /* {host:bool, myIndex:0|1, onMatchEnd(result,score), grid?:
+    /* {host:bool (легаси: симуляция всегда на сервере, поле
+       игнорируется), myIndex:0|1, onMatchEnd(result,score), grid?:
        {w,h} — серверная арена важнее локальной (SPEC: у обоих
        игроков одинаковые размеры) } */
     begin: function (opts) {
       const o = opts || {};
-      pred = null;       // T27: fresh prediction per match
-      predTimer = 0;
-      host = o.host !== false;
-      myIndex = (o.myIndex === 0 || o.myIndex === 1) ? o.myIndex : (host ? 0 : 1);
+      myIndex = (o.myIndex === 0 || o.myIndex === 1) ? o.myIndex : 0;
       foeIndex = 1 - myIndex;
       onMatchEndCb = typeof o.onMatchEnd === 'function' ? o.onMatchEnd : null;
 
@@ -1270,19 +1413,20 @@
       if (cfg && cfg.hooks && typeof cfg.hooks.resize === 'function') {
         try { cfg.hooks.resize(GW * CELL, GH * CELL); } catch (e) { /* canvasless */ }
       }
-      allocFlood();
 
       score = [0, 0];
       round = 1;
       matchEnded = false;
       banner = null;
       slowmo = 0;
-      stateTimer = 0;
-      netStateAge = 0;
       snapAge = 0;
       guestLastCount = -1;
-      events = { bite: 0, trap: 0, eat: 0, round: 0 };
       guestEvents = { bite: 0, trap: 0, eat: 0, round: 0 };
+      inputSeq = 0;
+      pingMs = 0;
+      pingKnown = false;
+      offSamples = [];
+      delayTicks = LEAD_DEFAULT;
       snakes = [makeSnake(3, 3, DIR.right, 1), makeSnake(6, 3, DIR.left, 1)];
       live = true;
       ensureNet();
@@ -1297,6 +1441,8 @@
       food = [];
       banner = null;
       slowmo = 0;
+      clock.run = false;
+      pred = null;
       onMatchEndCb = null;
     },
 
@@ -1306,28 +1452,30 @@
 
     /* feature T24 (SPEC §22): the lobby ui saw the rival's presence
        drop — end the live match as 'aborted' right now (the same
-       path as the guest's transport-silence timeout); after a match
+       path as the transport-silence timeout); after a match
        end this is a safe no-op */
     abort: function () {
       if (live) rivalLeft();
     },
 
-    /* steer MY snake: host queues directly, guest broadcasts */
     /* T27b: whose snake is whose — set by duelui at the match start */
     setRivalName: function (n) {
       rivalName = String(n || '').slice(0, 20);
     },
 
+    /* steer MY snake: мгновенный локальный отклик + вход с seq/tick
+       серверу (там он применяется ровно на том же тике) */
     input: function (d) {
       if (!live) return;
+      if (phase !== 'fight' && phase !== 'countdown') return;
       const v = normDir(d);
       if (!v) return;
-      if (host) {
-        if (snakes[myIndex]) queueTurn(snakes[myIndex], v);
-      } else {
-        netSend('turn', { dir: dirName(v) });
-        if (pred) queueTurn(pred, v); // T27: instant local response
-      }
+      inputSeq++;
+      const tick = (phase === 'fight' && pred) ? clock.tick + 1 : 1;
+      inputLog.push({ seq: inputSeq, tick: tick, dir: dirName(v) });
+      if (inputLog.length > INPUT_LOG_MAX) inputLog.shift();
+      netSend('turn', { dir: dirName(v), seq: inputSeq, tick: tick });
+      if (pred) queueTurn(pred, v); // свой тик — локальный, без сети
     },
 
     update: update,
@@ -1338,7 +1486,7 @@
     state: function () {
       return {
         live: live,
-        host: host,
+        host: false, // симуляция на сервере (легаси-поле для UI)
         myIndex: myIndex,
         phase: phase,
         phaseTimer: phaseTimer,
@@ -1350,9 +1498,37 @@
         food: food,
         banner: banner,
         slowmo: slowmo,
-        tickTimer: tickTimer,
-        events: events,
-        grid: { w: GW, h: GH, cell: CELL }
+        events: guestEvents,
+        grid: { w: GW, h: GH, cell: CELL },
+        /* неткод v2 — QA-телеметрия */
+        net: {
+          myTick: clock.tick,
+          tickFrac: clock.acc / TICK_STEP,
+          rate: clock.rate,
+          running: clock.run,
+          lastTk: lastTk,
+          sq: mySq,
+          seq: inputSeq,
+          delayTicks: delayTicks,
+          renderTick: Math.min(clock.tick + clock.acc / TICK_STEP - delayTicks,
+            lastTk >= 0 ? lastTk - 0.02 : Infinity),
+          pingMs: pingMs,
+          pingKnown: pingKnown,
+          offMag: offMag,
+          snapBufLen: snapBuf.length,
+          starving: !clock.run && phase === 'fight',
+          inputLogLen: inputLog.length,
+          arena: arenaInfo ? arenaInfo.k + '@' + arenaInfo.s + '-' + arenaInfo.e : null,
+          predDir: pred ? dirName(pred.dir) : null,
+          predSegs: pred ? pred.segs.map(function (sg) { return sg.curr.x + ',' + sg.curr.y; }) : null,
+          srvSegs: snakes[myIndex] ? snakes[myIndex].segs.map(function (sg) { return sg.curr.x + ',' + sg.curr.y; }) : null,
+          dispHead: (function () {
+            const p = myPose();
+            if (!p || !p.pts.length) return null;
+            return (Math.round(p.pts[0].x * 100) / 100) + ',' +
+              (Math.round(p.pts[0].y * 100) / 100);
+          })()
+        }
       };
     }
   };

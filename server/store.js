@@ -59,7 +59,12 @@ Store.prototype._load = function (name) {
       return out;
     }
   } catch (e) {
-    /* нет файла или битый JSON — начинаем с пустого списка */
+    /* нет файла или битый JSON — начинаем с пустого списка; битый
+       файл прежде чем затереть сохраняем как .bad: разовая порча
+       не должна молча стоить всей истории */
+    try {
+      fs.renameSync(this._file(name), this._file(name + '.bad'));
+    } catch (e2) { /* файла не было или переименовать нельзя */ }
   }
   return [];
 };
@@ -129,6 +134,20 @@ Store.prototype.addScore = function (entry) {
     season: String(entry.season || ''),
     created_at: new Date().toISOString()
   };
+  /* один игрок — один рекорд в сезоне: улучшение перезаписывает его
+     строку, худший результат мимо (таблица = лучшие, без дублей) */
+  const key = row.name.toLowerCase();
+  for (let i = 0; i < this.scores.length; i++) {
+    const r = this.scores[i];
+    if (r.season === row.season && String(r.name).toLowerCase() === key) {
+      if (row.score > r.score) {
+        this.scores[i] = row;
+        this._dirty.scores = true;
+        this._schedule();
+      }
+      return true;
+    }
+  }
   this.scores.push(row);
   this._trimScores();
   this._dirty.scores = true;
@@ -157,7 +176,7 @@ Store.prototype._trimScores = function () {
 
 /* топ сезона (или общий), отсортирован по очкам, максимум limit */
 Store.prototype.top = function (season, limit) {
-  const n = Math.max(1, Math.min(50, Math.floor(Number(limit) || 10)));
+  const n = Math.max(1, Math.min(100, Math.floor(Number(limit) || 10)));
   let rows = this.scores;
   if (season) rows = rows.filter(function (r) { return r.season === season; });
   return rows.slice().sort(function (a, b) { return b.score - a.score; }).slice(0, n);
@@ -238,11 +257,16 @@ Store.prototype._pvpSeasonCheck = function () {
   this._schedulePvp();
 };
 
+const PVP_PLAYERS_MAX = 2000; // кап карточек: pvp.json не растёт вечно
+
 Store.prototype._pvpPlayer = function (name) {
   this._pvpLoad();
   this._pvpSeasonCheck(); // долгоживущий процесс может перейти месяц
   const key = String(name || '').slice(0, 20);
   if (!this.pvp.players[key]) {
+    /* сверх капа новичок не заводится: неаутентифицированный спам
+       именами не раздувает хранилище и топ */
+    if (Object.keys(this.pvp.players).length >= PVP_PLAYERS_MAX) return null;
     this.pvp.players[key] = {
       rating: RATING_START, bestRating: RATING_START,
       wins: 0, losses: 0, matches: 0,
@@ -306,6 +330,11 @@ Store.prototype.addPvpResult = function (rec) {
 
   const W = this._pvpPlayer(winner);
   const L = this._pvpPlayer(loser);
+  if (!W || !L) {
+    /* сверх капа карточек: исход в историю дуэлей пишется (он капнут),
+       рейтинг не трогаем */
+    return;
+  }
 
   /* счётчики «за сегодня» перекатываются на новый день */
   const today = dayKey();
@@ -416,7 +445,7 @@ Store.prototype.pvpPublic = function (name) {
 /* топ по рейтингу; у каждой строки — старший достигнутый статус */
 Store.prototype.pvpTop = function (limit) {
   this._pvpLoad();
-  const n = Math.max(1, Math.min(50, Math.floor(Number(limit) || 10)));
+  const n = Math.max(1, Math.min(100, Math.floor(Number(limit) || 10)));
   const rows = [];
   for (const name in this.pvp.players) {
     if (!Object.prototype.hasOwnProperty.call(this.pvp.players, name)) continue;

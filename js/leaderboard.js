@@ -74,8 +74,42 @@
   }
 
   /* defensive copy: sorted by score desc, capped at MAX_ENTRIES */
+  /* ключ игрока: тримминг + нижний регистр («Bob» = «bob») */
+  function nameKey(name) {
+    return String(name || '').trim().slice(0, NAME_MAX).toLowerCase();
+  }
+
+  function findRow(rows, name) {
+    const k = nameKey(name);
+    if (!k) return null;
+    for (let i = 0; i < rows.length; i++) {
+      if (nameKey(rows[i] && rows[i].name) === k) return rows[i];
+    }
+    return null;
+  }
+
+  /* один игрок — одна строка: держим только его ЛУЧШИЙ результат
+     (старые дубли одного имени схлопываются при первом чтении —
+     таблица всегда свежая, без ручной очистки), далее топ-10 */
   function normalize(entries) {
-    return entries.slice().sort(byScoreDesc).slice(0, MAX_ENTRIES);
+    const src = Array.isArray(entries) ? entries : [];
+    const best = {};
+    const order = [];
+    for (let i = 0; i < src.length; i++) {
+      const e = src[i];
+      if (!e || !positive(Number(e.score))) continue;
+      const k = nameKey(e.name);
+      if (!k) continue;
+      if (!Object.prototype.hasOwnProperty.call(best, k)) {
+        best[k] = e;
+        order.push(k);
+      } else if (Number(e.score) > Number(best[k].score)) {
+        best[k] = e;
+      }
+    }
+    return order.map(function (k) { return best[k]; })
+      .sort(byScoreDesc)
+      .slice(0, MAX_ENTRIES);
   }
 
   /* local date as DD.MM.YYYY */
@@ -221,18 +255,27 @@
      never throws. An empty season answer triggers ONE retry without
      the filter — the first days of a fresh season serve the previous
      month's rows instead of an empty board */
+  let remoteTop = null; // последний успешный глобальный топ (гейт промпта)
+
   function fetchRemote(callback) {
     const done = typeof callback === 'function' ? callback : function () {};
     if (!isGlobal()) {
       done(null); // local mode: no network at all
       return;
     }
-    fetchQuery(endpoint('/api/top?season=' + seasonKey() + '&limit=10'), function (rows) {
+    fetchQuery(endpoint('/api/top?season=' + seasonKey() + '&limit=100'), function (rows) {
       if (rows && rows.length) {
+        remoteTop = rows;
         done(rows);
         return;
       }
-      fetchQuery(endpoint('/api/top?limit=10'), function (all) {
+      if (!rows) {
+        done(null); // сеть/сервер недоступны: без второго 5-секундного
+        return;     // таймаута — сразу честный откат на локальные строки
+      }
+      /* ПУСТОЙ сезонный ответ (начало месяца) — один ретри без фильтра */
+      fetchQuery(endpoint('/api/top?limit=100'), function (all) {
+        if (all && all.length) remoteTop = all;
         done(all && all.length ? all : null);
       });
     });
@@ -291,11 +334,24 @@
       return normalize(providerRead());
     },
 
-    /* true when the score is positive AND earns a top-10 slot */
-    qualifies: function (score) {
+    /* true when the score is positive AND earns a top-10 slot.
+       В глобальном режиме гейт — последний полученный МИРОВОЙ топ
+       (локальное зеркало вводило в заблуждение «ВЫ В ТОП-10!» при
+       счёте заведомо ниже мирового); до первого fetch — как раньше */
+    /* name (опционально): свой рекорд живёт в таблице независимо от
+       чужого топ-10 — улучшение собственной строки проходит всегда */
+    qualifies: function (score, name) {
       const s = Number(score);
       if (!positive(s)) return false;
+      if (isGlobal() && Array.isArray(remoteTop)) {
+        const mine = findRow(remoteTop, name);
+        if (mine) return s > Number(mine.score);
+        if (remoteTop.length < MAX_ENTRIES) return true;
+        return s > Number(remoteTop[MAX_ENTRIES - 1].score);
+      }
       const top = normalize(providerRead());
+      const mine = findRow(top, name);
+      if (mine) return s > Number(mine.score);
       if (top.length < MAX_ENTRIES) return true;
       return s > top[MAX_ENTRIES - 1].score;
     },
@@ -305,12 +361,16 @@
        feature T14: in global mode the record is also mirrored to
        the game server fire-and-forget — a network failure changes nothing
        locally (submitRemote reports via its own callback). */
-    submit: function (entry) {
+    /* onDone (опционально) срабатывает, когда зеркалирование на
+       сервер завершено (локальный режим — сразу): ui перерисовывает
+       доску ПОСЛЕ персистенции POST, иначе GET обгонял запись и
+       свежая строка исчезала из показанного топа */
+    submit: function (entry, onDone) {
       if (!entry) return false;
       const s = Number(entry.score);
-      if (!positive(s) || !CS.Leaderboard.qualifies(s)) return false;
       const name = String(entry.name || '').trim().slice(0, NAME_MAX);
-      if (!name) return false;
+      if (!positive(s) || !name) return false;
+      if (!CS.Leaderboard.qualifies(s, name)) return false;
       const level = Number(entry.level);
       const record = {
         name: name,
@@ -322,7 +382,9 @@
       entries.push(record);
       providerWrite(normalize(entries));
       if (isGlobal()) {
-        submitRemote(record, null); // fire-and-forget
+        submitRemote(record, typeof onDone === 'function' ? onDone : null);
+      } else if (typeof onDone === 'function') {
+        onDone();
       }
       return true;
     },
@@ -330,6 +392,43 @@
     /* wipe the LOCAL board (the global one has no delete policy) */
     clear: function () {
       providerClear();
+    },
+
+    /* SPEC §13: место игрока в мировом топе-100 (0 — не рейтингован);
+       кормит приветствие на входе («ты лидер» / «твоё место N») */
+    myRank: function (name, callback) {
+      const done = typeof callback === 'function' ? callback : function () {};
+      const nk = nameKey(name);
+      if (!nk) {
+        done(0);
+        return;
+      }
+      fetchRemote(function (rows) {
+        if (!rows) {
+          done(0);
+          return;
+        }
+        for (let i = 0; i < rows.length; i++) {
+          if (nameKey(rows[i] && rows[i].name) === nk) {
+            done(i + 1);
+            return;
+          }
+        }
+        done(0);
+      });
+    },
+
+    /* совпадает ли имя с сохранённым ником игрока (подсветка строки) */
+    isMyName: function (name) {
+      let mine = '';
+      try {
+        mine = String(window.localStorage.getItem('cs_name') || '').trim();
+      } catch (e) {
+        mine = '';
+      }
+      const a = nameKey(name);
+      const b = nameKey(mine);
+      return !!a && a === b;
     },
 
     /* feature T14: async global top-10; callback(rows | null) */

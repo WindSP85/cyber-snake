@@ -303,6 +303,7 @@
      supported by net.js) and refresh the rematch button */
   function reset() {
     flow++;
+    mySide = null;
     netSend('bye');
     stopLobbyWatch();
     try {
@@ -418,7 +419,14 @@
       mid.className = 'lc-mid';
       const nm = document.createElement('span');
       nm.className = 'lc-name';
-      nm.textContent = String(r.name || 'PLAYER').slice(0, 20);
+      if (r.lead) {
+        /* SPEC §13: у лидера общей таблицы рекордов — бейдж в подборе */
+        const leadChip = document.createElement('span');
+        leadChip.className = 'lc-lead';
+        leadChip.textContent = t('lobbyLead');
+        nm.appendChild(leadChip);
+      }
+      nm.appendChild(document.createTextNode(String(r.name || 'PLAYER').slice(0, 20)));
       const meta = document.createElement('span');
       meta.className = 'lc-meta';
       meta.textContent = '\u2605 ' + (r.rating | 0 || 1000) + '  \u00b7  ' + (r.w | 0) + ':' + (r.l | 0);
@@ -681,15 +689,17 @@
   /* «ПОКИНУТЬ КОМНАТУ»: попрощаться и вернуться на дом-экран лобби */
   function onLeaveRoom() {
     if (inMatch()) return;
+    /* mode гасим ДО leave(): тот синхронно эмитит пустой presence,
+       и handlePresence не должен принять выход за обрыв (rejoin) */
+    mode = 'idle';
+    flow++;
     netSend('bye', null);
     try {
       if (CS.Net && typeof CS.Net.leave === 'function') CS.Net.leave();
     } catch (e) {
       /* канал уже мёртв */
     }
-    mode = 'idle';
     connected = false;
-    flow++;
     resetLobby();
   }
 
@@ -703,6 +713,13 @@
 
   /* старт срабатывает один раз: оба готовы и мы хост */
   /* ---------- the match ---------- */
+
+  /* моя сторона ПО СЕРВЕРНОМУ 'start': mode ('host') врёт после
+     пересборки комнаты (хост вышел — гость стал стороной 0) */
+  let mySide = null;
+  function mySideOf() {
+    return mySide === 0 || mySide === 1 ? mySide : (mode === 'host' ? 0 : 1);
+  }
 
   /* старт матча приходит от СЕРВЕРА ('start' {side, gw, gh}): оба
      игрока — рендереры снапшотов, симуляция живёт на сервере */
@@ -727,6 +744,7 @@
     const side = startData && (startData.side === 0 || startData.side === 1)
       ? startData.side
       : (mode === 'host' ? 0 : 1);
+    mySide = side; // дальше весь ui считает сторону по серверу
     const grid = startData && Number.isFinite(startData.gw) && Number.isFinite(startData.gh)
       ? { w: startData.gw, h: startData.gh }
       : null;
@@ -756,7 +774,7 @@
         (r === 'aborted' ? 'left' : r);
     }
     const sc = res && Array.isArray(res.score) ? res.score : [0, 0];
-    const myIdx = mode === 'host' ? 0 : 1;
+    const myIdx = mySideOf();
     const mine = (sc[myIdx] | 0) + ':' + (sc[1 - myIdx] | 0);
     lastR = r;
     lastScore = mine;
@@ -773,7 +791,7 @@
     window.setTimeout(fetchPvpQuiet, 2500);
     /* ПВП-задания (SPEC §28): дейлик + недельный по итогам матча */
     if (r === 'win' || r === 'loss') {
-      const myIdx2 = mode === 'host' ? 0 : 1;
+      const myIdx2 = mySideOf();
       const myWins = sc[myIdx2] | 0;
       const foeWins = sc[1 - myIdx2] | 0;
       if (CS.Quests && typeof CS.Quests.event === 'function') {
@@ -992,7 +1010,7 @@
 
   function tryRejoin() {
     rejoinTimer = 0;
-    if (mode === 'idle' || !started || ended) {
+    if (mode === 'idle' || ended) {
       rejoinTries = 0;
       return;
     }
@@ -1025,10 +1043,11 @@
 
   function handlePresence(list, diff) {
     if (mode === 'idle') return;
-    /* сокет умер (нет список пуст): это обрыв, а не уход соперника —
-     пытаемся вернуться в бой, пока сервер держит грейс */
+    /* сокет умер (список пуст): это обрыв, а не уход соперника —
+     пытаемся вернуться (в бой — пока сервер держит грейс; в лобби —
+     комната продолжает жить с одним игроком) */
     if (!Array.isArray(list) || !list.length) {
-      if (started && !ended) scheduleRejoin();
+      if (!ended) scheduleRejoin();
       return;
     }
     let others = 0;
@@ -1088,7 +1107,7 @@
       /* ПВП: способ победы в раунде (duel.js endRound → k) */
       const w = data && typeof data.w === 'number' ? data.w : -1;
       const k = data ? String(data.k || '') : '';
-      const mine = w === (mode === 'host' ? 0 : 1);
+      const mine = w === mySideOf();
       if (w >= 0 && mine) {
         if (k === 'dEat') myCauses.push('bite');
         else if (k === 'dTrapped') myCauses.push('loop');

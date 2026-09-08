@@ -37,6 +37,9 @@ UPLOAD = [
     ('server/bot.js', 'server/bot.js'),
     ('server/Caddyfile', 'server/Caddyfile'),
     ('server/ws', 'server/ws'),          # каталог целиком
+    # ядро дуэли живёт в js/ (общее с браузером), контейнеру — в server/
+    # (без него Dockerfile не соберётся: COPY server/duel-core.js)
+    ('js/duel-core.js', 'server/duel-core.js'),
     ('Dockerfile', 'Dockerfile'),
     ('docker-compose.yml', 'docker-compose.yml'),
     ('.env.example', '.env.example'),
