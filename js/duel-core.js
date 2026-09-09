@@ -437,15 +437,21 @@
       takeTurn(0);
       takeTurn(1);
 
-      /* расписание секрета арены: детерминированный телеграф —
-         10 тиков до старта маски (s = tickN + 10) */
+      /* аудит: секрет ЗАКОНЧИЛСЯ (tickN >= e) — arena обнуляется, иначе
+         второй секрет в раунде невозможен (SPEC: «далее раз в 16-28 с»).
+         Паритет не страдает: после e k=0 у обеих сторон, ar:null гасит
+         arenaInfo клиента */
+      if (arena && tickN >= arena.e) arena = null;
+
+      /* расписание: детерминированный телеграф — 10 тиков до старта
+         маски (s = tickN + 10); пауза считается от КОНЦА секрета */
       if (!arena && tickN >= arenaNext) {
         arena = {
           k: Math.random() < 0.5 ? 'circle' : 'pulse',
           s: tickN + 10,
           e: tickN + 10 + ARENA_DUR_TICKS
         };
-        arenaNext = tickN + ARENA_GAP_MIN +
+        arenaNext = arena.e + ARENA_GAP_MIN +
           Math.floor(Math.random() * (ARENA_GAP_MAX - ARENA_GAP_MIN));
       }
 

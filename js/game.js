@@ -351,15 +351,19 @@
     return snakeScratch;
   }
 
-  /* SPEC §4: клетки, куда боссу заходить нельзя — еда/бонус/пикапы */
+  /* SPEC §4: клетки, куда боссу заходить нельзя — еда/бонус/пикапы.
+     Аудит-перф: Set переиспользуется (clear+add), не аллоцируется
+     каждый кадр боя */
+  const bossAvoidScratch = new Set();
+
   function bossAvoidKeys() {
-    const avoid = new Set();
-    if (food) avoid.add(key(food.x, food.y));
-    if (bonus) avoid.add(key(bonus.x, bonus.y));
+    bossAvoidScratch.clear();
+    if (food) bossAvoidScratch.add(key(food.x, food.y));
+    if (bonus) bossAvoidScratch.add(key(bonus.x, bonus.y));
     for (let i = 0; i < pickups.length; i++) {
-      avoid.add(key(pickups[i].x, pickups[i].y));
+      bossAvoidScratch.add(key(pickups[i].x, pickups[i].y));
     }
-    return avoid.size ? avoid : null;
+    return bossAvoidScratch.size ? bossAvoidScratch : null;
   }
 
   /* ---------- score ---------- */
@@ -379,7 +383,7 @@
     score += gained;
     if (score > best) {
       best = score;
-      saveBest();
+      scheduleBestSave(); // дебаунс вместо синхронной записи
       CS.UI.hud({ best: best });
     }
     CS.UI.hud({ score: score });
@@ -482,7 +486,9 @@
     const free = [];
     for (let y = 0; y < GRID_H; y++) {
       for (let x = 0; x < GRID_W; x++) {
-        if (!occ.has(key(x, y))) free.push({ x: x, y: y });
+        if (occ.has(key(x, y))) continue;
+        if (arenaFx && !arenaPlayableCell(x, y)) continue; // аудит: не в маске
+        free.push({ x: x, y: y });
       }
     }
     if (!free.length) return null;
@@ -699,9 +705,9 @@
 
   /* devourer bite: up to 3 tail segments, min length 3, -25 each */
   function onBossTailBite() {
+    if (snake.length <= 3) return; // аудит: гвард раньше чавканья-пустышки
     CS.Audio.sfx('gulp');
     CS.FX.shake(5);
-    if (snake.length <= 3) return; // nothing edible left
     const n = Math.min(BITE_MAX, snake.length - 3);
     for (let i = 0; i < n; i++) {
       const tail = snake.pop();
@@ -772,6 +778,7 @@
 
   function die() {
     if (state === 'dying' || state === 'gameover' || state === 'respawning') return;
+    arenaFx = null; // аудит: секрет не должен встречать респавн маской
     CS.TG.haptic('error'); // feature T15: the death buzz
     if (lives > 0) { // feature T8: a spare life reboots the snake
       CS.Ach.event('respawn'); // feature T16: a spent life counts
@@ -918,7 +925,10 @@
   }
 
   /* привязка выбранного ника к Telegram-айди: переживает закрытие
-     игры — завтра того же игрока узнаём без вопросов */
+     игры — завтра того же игрока узнаём без вопросов. Аудит: имя
+     живёт на СЛОТЕ айди (cs_name#id) — смена TG-аккаунта на том же
+     браузере больше не подменяет чужой ник (cs_name — только «текущий»,
+     для дуэлей и продолжения вне Telegram) */
   function loadTgId() {
     try {
       return window.localStorage.getItem('cs_tg_id') || '';
@@ -935,17 +945,37 @@
     }
   }
 
+  function loadTgSlot(id) {
+    try {
+      return String(window.localStorage.getItem('cs_name#' + id) || '').trim().slice(0, 20);
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function saveTgNick(id, name) {
+    saveTgId(id);
+    savePlayerName(name);
+    try {
+      window.localStorage.setItem('cs_name#' + String(id), String(name).slice(0, 20));
+    } catch (e) {
+      /* storage unavailable: слот не критичен, cs_name уже записан */
+    }
+  }
+
   /* канонический ник: TG-ник → имя, привязанное к этому айди →
      ключ «id…» (аварийный, пока не спросили) → сохранённое имя */
   function playerNick() {
     const u = tgUser();
     if (u) {
       const nick = String(u.username || '').trim().slice(0, 20);
-      if (nick) return nick;
+      if (nick) return nick; // живой ник Telegram всегда точен
       const id = Number(u.id);
       const idKey = Number.isFinite(id) && id > 0 ? String(id) : '';
       if (idKey) {
-        if (loadTgId() === idKey && loadPlayerName()) return loadPlayerName();
+        const slot = loadTgSlot(idKey);
+        if (slot) return slot;
+        if (loadTgId() === idKey && loadPlayerName()) return loadPlayerName(); // легаси-привязка
         return 'id' + idKey;
       }
     }
@@ -961,12 +991,16 @@
     const id = Number(u.id);
     const idKey = Number.isFinite(id) && id > 0 ? String(id) : '';
     if (nick) {
-      savePlayerName(nick);
-      if (idKey) saveTgId(idKey);
+      if (idKey) saveTgNick(idKey, nick);
+      else savePlayerName(nick);
       return;
     }
     if (!idKey) return;
-    if (loadTgId() === idKey && loadPlayerName()) return; // уже спрошено
+    if (loadTgSlot(idKey)) { // этот айди уже спрашивали — молча
+      saveTgNick(idKey, loadTgSlot(idKey));
+      return;
+    }
+    if (loadTgId() === idKey && loadPlayerName()) return; // легаси-привязка
     showNickDialog(String(u.first_name || '').trim().slice(0, 20), idKey);
   }
 
@@ -1015,8 +1049,7 @@
     const typed = input ? String(input.value || '').trim().slice(0, 20) : '';
     /* пусто — не тупим: имя из профиля, иначе ключ айди */
     const nm = typed || p.first || ('id' + p.idKey);
-    savePlayerName(nm);
-    saveTgId(p.idKey);
+    saveTgNick(p.idKey, nm); // слот + cs_name + привязка
     const dlg = document.getElementById('nick-dialog');
     if (dlg) dlg.classList.add('hidden');
   }
@@ -1184,22 +1217,23 @@
   const ARENA_DUR = 6;           // секунд
   let arenaFx = null;            // {kind, t0}
 
-  function arenaEnvelope(t) {
-    const IN = 0.7, OUT = 1.0;   // плавный вход/выход, секунды
+  /* вход масштабируется под ТЕКУЩУЮ скорость змейки: под slow/ice/
+     freeze успеть убежать из угла физически невозможно при 0.7 c */
+  function arenaEnvelope(t, tIn) {
+    const OUT = 1.0;             // плавный выход, секунды
     if (t <= 0) return 0;
-    if (t < IN) return t / IN;
+    if (t < tIn) return t / tIn;
     if (t < ARENA_DUR - OUT) return 1;
     return Math.max(0, (ARENA_DUR - t) / OUT);
   }
 
+  /* чистый геттер: время копится update()-ом на dt (пауза = заморозка,
+    никаких настенных часов), протухание — там же */
   function arenaState() {
     if (!arenaFx) return null;
-    const t = (Date.now() - arenaFx.t0) / 1000;
-    if (t >= ARENA_DUR) {
-      arenaFx = null; // срок вышел: арена снова прямоугольник
-      return null;
-    }
-    return { kind: arenaFx.kind, t: t, k: arenaEnvelope(t) };
+    const t = arenaFx.t;
+    if (t >= ARENA_DUR) return null;
+    return { kind: arenaFx.kind, t: t, k: arenaEnvelope(t, arenaFx.tIn) };
   }
 
   /* играбельна ли клетка (логика): центры клеток против маски */
@@ -1239,52 +1273,41 @@
     return true;
   }
 
-  /* контур маски в пикселях (для клипа/обводки); null = без маски.
-     Математика 1:1 с arenaPlayableCell — граница совпадает с логикой */
-  function arenaPath(g) {
+  /* контур маски в пикселях: ОДИН Path2D на кадр — и клип, и обводка
+     (аудит: путь строился дважды); null = без маски. Математика 1:1
+     с arenaPlayableCell — граница совпадает с логикой */
+  function arenaPath() {
     const a = arenaState();
     if (!a || a.k <= 0.01 || a.kind === 'maze') return null;
     const W = GRID_W * CELL, H = GRID_H * CELL;
     const cx = W / 2, cy = H / 2;
     const ccx = GRID_W / 2, ccy = GRID_H / 2;
-    g.beginPath();
+    const p = new Path2D();
     if (a.kind === 'circle') {
       const rFull = Math.sqrt(ccx * ccx + ccy * ccy);
       const r = (rFull - (rFull - Math.max(ccx, ccy) * 0.72) * a.k) * CELL;
-      g.arc(cx, cy, Math.max(1, r), 0, Math.PI * 2);
+      p.arc(cx, cy, Math.max(1, r), 0, Math.PI * 2);
     } else if (a.kind === 'diamond') {
       const ax = (ccx - (ccx - ccx * 0.55) * a.k) * CELL;
       const ay = (ccy - (ccy - ccy * 0.55) * a.k) * CELL;
-      g.moveTo(cx, cy - ay);
-      g.lineTo(cx + ax, cy);
-      g.lineTo(cx, cy + ay);
-      g.lineTo(cx - ax, cy);
-      g.closePath();
+      p.moveTo(cx, cy - ay);
+      p.lineTo(cx + ax, cy);
+      p.lineTo(cx, cy + ay);
+      p.lineTo(cx - ax, cy);
+      p.closePath();
     } else if (a.kind === 'cross') {
       const hx = (ccx - (ccx - GRID_W * 0.14) * a.k) * CELL;
       const hy = (ccy - (ccy - GRID_H * 0.17) * a.k) * CELL;
-      g.rect(0, cy - hy, W, hy * 2); // горизонтальное плечо
-      g.rect(cx - hx, 0, hx * 2, H); // вертикальное: union в одном path
+      p.rect(0, cy - hy, W, hy * 2); // горизонтальное плечо
+      p.rect(cx - hx, 0, hx * 2, H); // вертикальное: union в одном path
     } else if (a.kind === 'pulse') {
       const m = Math.min(GRID_W, GRID_H) * 0.16 *
         Math.sin(Math.min(1, a.t / ARENA_DUR) * Math.PI) * CELL;
-      g.rect(m, m, W - m * 2, H - m * 2);
+      p.rect(m, m, W - m * 2, H - m * 2);
     } else {
       return null;
     }
-    return a;
-  }
-
-  /* неоновая граница текущей формы арены */
-  function arenaStroke(g) {
-    if (!arenaPath(g)) return;
-    g.save();
-    g.strokeStyle = '#00f0ff';
-    g.lineWidth = 2;
-    g.shadowColor = '#00f0ff';
-    g.shadowBlur = 14;
-    g.stroke();
-    g.restore();
+    return p;
   }
 
   /* лабиринт: стены-колонны проявляются/тают вместе с k */
@@ -1360,6 +1383,10 @@
       if (dy !== 0) dirs.push([0, dy > 0 ? 1 : -1]);
       if (dx !== 0) dirs.push([dx > 0 ? 1 : -1, 0]);
     }
+    /* аудит: фолбэк-перпендикуляры — у колонны лабиринта охотник
+       больше не встаёт намертво до конца маски */
+    if (dirs.length && dirs[0][0] !== 0) dirs.push([0, 1], [0, -1]);
+    else if (dirs.length) dirs.push([1, 0], [-1, 0]);
     for (let i = 0; i < dirs.length; i++) {
       const nx = h.x + dirs[i][0];
       const ny = h.y + dirs[i][1];
@@ -1371,7 +1398,7 @@
       h.y = ny;
       return;
     }
-    h.fx = h.x; // зажат со всех сторон — топчется на месте
+    h.fx = h.x; // совсем зажат — топчется на месте
     h.fy = h.y;
   }
 
@@ -1509,6 +1536,16 @@
     }
   }
 
+  /* честный переброс кубика тайны с исключениями (аудит: раньше
+     фиксированный 'double' и пустой split) */
+  function rerollMystery(exclude) {
+    for (let i = 0; i < 12; i++) {
+      const r = rollMystery();
+      if (exclude.indexOf(r) === -1) return r;
+    }
+    return 'jackpot';
+  }
+
   function applyMystery(px, py, forced) {
     CS.Audio.sfx('mystery');
     CS.FX.flash('#ffffff', 0.15);
@@ -1534,14 +1571,16 @@
       CS.Audio.sfx('life');
       CS.UI.toast(tr('mLifeRe'));
     } else if (kind === 'arena') {
-      /* секрет арены: на бою с боссом не катит — перебрасываем кубик */
-      if (fight && fight.active) {
-        applyMystery(px, py, 'double');
+      /* аудит: на боссе И под сильным замедлением (побег из угла
+         невозможен) — честный случайный переброс, не фиксированный */
+      if ((fight && fight.active) || hasEffect('freeze') || dailyOn('ice')) {
+        applyMystery(px, py, rerollMystery(['arena']));
         return;
       }
       arenaFx = {
         kind: ARENA_KINDS[Math.floor(Math.random() * ARENA_KINDS.length)],
-        t0: Date.now()
+        t: 0,
+        tIn: Math.max(0.7, Math.min(2.0, 0.7 * stepInterval * BASE_TPS))
       };
       CS.UI.toast(tr('pArena'));
       CS.Audio.sfx('warn');
@@ -1552,9 +1591,14 @@
       CS.Audio.sfx('reverse');
       CS.UI.toast(tr('mReverse'));
     } else if (kind === 'split') {
-      CS.Audio.sfx('split');
-      splitSnake();
-      CS.UI.toast(tr('mSplit'));
+      /* аудит: короткая змейка — не пустышка со звуком, а переброс */
+      if (splitSnake()) {
+        CS.Audio.sfx('split');
+        CS.UI.toast(tr('mSplit'));
+      } else {
+        applyMystery(px, py, rerollMystery(['split', 'arena']));
+        return;
+      }
     } else if (kind === 'death') {
       CS.UI.toast(tr('mDeath'));
       die(); // spare lives still save, as everywhere else (T8)
@@ -1564,7 +1608,7 @@
   /* the mystery 'split': the snake sheds everything past 3 segments;
      the first and the last shed cells hatch exactly two escaped cores */
   function splitSnake() {
-    if (snake.length <= SPLIT_MIN_LEN) return; // too short to shed
+    if (snake.length <= SPLIT_MIN_LEN) return false; // too short to shed
     const shed = [];
     for (let i = SPLIT_KEEP; i < snake.length; i++) {
       shed.push({ x: snake[i].curr.x, y: snake[i].curr.y });
@@ -1585,6 +1629,7 @@
     const last = escapedSpot(shed[shed.length - 1], occ);
     if (last) escaped.push(last);
     CS.FX.shake(6);
+    return true;
   }
 
   /* a shed cell, or a free neighbour when it is taken */
@@ -1669,7 +1714,9 @@
     const zy1 = Math.min(BANK_ZONE.y1, GRID_H - 3);
     for (let y = BANK_ZONE.y0; y <= zy1; y++) {
       for (let x = BANK_ZONE.x0; x <= zx1; x++) {
-        if (!occ.has(key(x, y))) free.push({ x: x, y: y });
+        if (!occ.has(key(x, y))) continue;
+        if (arenaFx && !arenaPlayableCell(x, y)) continue; // аудит
+        free.push({ x: x, y: y });
       }
     }
     if (!free.length) return false;
@@ -1915,6 +1962,7 @@
     // feature T21: count the run; the tutorial window is the first
     // TUT_RUNS ones and every queued hint dies with the run
     bumpRuns();
+    arenaFx = null;      // аудит: новый забег — без маски прошлого
     hunters = [];        // SPEC §29: новый забег — охота с чистого листа
     hunterTimer = HUNTER_FIRST;
     tutTimers = [];
@@ -2006,6 +2054,8 @@
     debris = [];       // feature T9
     escaped = [];      // feature T11
     bank = null;       // feature T11
+    arenaFx = null;    // финальная ревизия: выход в меню гасит всё
+    hunters = [];
     tutTimers = [];    // feature T21: leftover hints die with the run
     CS.Daily.stop();   // feature T20: leaving the field ends the challenge
     invulnTimer = 0;
@@ -2145,6 +2195,13 @@
     // not the snake; the page-scroll guard does not apply either
     const target = e.target;
     if (target && target.tagName === 'INPUT') return;
+    /* аудит: пока открыт диалог ника — игра не стартует «за спиной»;
+       Enter в любом месте подтверждает ник */
+    if (nickPending) {
+      const c = e.code || '';
+      if (c === 'Enter' || c === 'NumpadEnter') confirmNick();
+      return;
+    }
     const code = e.code || '';
     if (code.indexOf('Arrow') === 0 || code === 'Space') {
       if (e.preventDefault) e.preventDefault();
@@ -2282,6 +2339,10 @@
       updateEscaped(dt);   // feature T11
       updateBank(dt);      // feature T11
       updateHunters(dt);   // SPEC §29: охотники-призраки
+      if (arenaFx) {
+        arenaFx.t += dt;  // P1-аудит: арена на игровом времени — пауза морозит
+        if (arenaFx.t >= ARENA_DUR) arenaFx = null;
+      }
 
       if (invulnTimer > 0) invulnTimer = Math.max(0, invulnTimer - dt);
 
@@ -2364,10 +2425,10 @@
     g.fillRect(0, 0, W, H);
     /* SPEC §14: секрет арены — сцена рисуется внутри маски, снаружи
      остаётся пустота; лабиринт рисуется стенами поверх (без клипа) */
-    const arMask = arenaPath(g);
-    if (arMask) {
+    const arPath = arenaPath();
+    if (arPath) {
       g.save();
-      g.clip();
+      g.clip(arPath);
     }
     drawGrid();
 
@@ -2382,9 +2443,15 @@
       drawSnake();
       drawHunters(g); // SPEC §29: охотники поверх змейки
     }
-    if (arMask) {
+    if (arPath) {
       g.restore();
-      arenaStroke(g);
+      g.save();
+      g.strokeStyle = '#00f0ff';
+      g.lineWidth = 2;
+      g.shadowColor = '#00f0ff';
+      g.shadowBlur = 14;
+      g.stroke(arPath); // неоновая граница текущей формы
+      g.restore();
     }
     drawArenaWalls(g);
     drawDarkMask(); // feature T20: the 'dark' vignette over the scene
@@ -2852,6 +2919,18 @@
     g.restore();
   }
 
+  let bestSaveTimer = 0;
+
+  /* аудит: синхронная запись localStorage на каждом рекордном
+     начислении (до ~14/с) — дебаунс: не чаще раза в секунду */
+  function scheduleBestSave() {
+    if (bestSaveTimer) return;
+    bestSaveTimer = window.setTimeout(function () {
+      bestSaveTimer = 0;
+      saveBest();
+    }, 1000);
+  }
+
   function drawSnake() {
     const n = snake.length;
     if (!n) return; // feature T8: empty during the 'respawning' reboot
@@ -3055,7 +3134,6 @@
     // спросить ник и привязать к айди) — до первого забега
     wireNickDialog();
     initPlayerIdentity();
-    announceRank(); // и сразу: «ты лидер рейтинга» / «твоё место N»
 
     canvas = document.getElementById('game-canvas');
     if (canvas) {
@@ -3158,6 +3236,9 @@
     }
     CS.UI.show(savedLang ? 'menu' : 'lang');
     state = 'menu';
+    arenaFx = null; // аудит: меню — арена гаснет
+    hunters = [];
+    if (savedLang) announceRank(); // ревизия: первому запуску — сперва язык
     // feature T24 (SPEC §22): a room-XXXX Telegram deep link opens the
     // duel lobby (the code pre-filled + an auto-join) instead of the
     // language picker — the rival is already waiting in that room
@@ -3194,6 +3275,8 @@
           effects: effects.map(function (e) { return e.type + ':' + Math.ceil(e.timer); }),
           pickups: pickups.map(function (p) { return p.type; }),
           bank: bank ? bank.x + ',' + bank.y : null,
+          hunters: hunters.length,
+          arena: arenaFx ? arenaFx.kind + ':' + arenaFx.t.toFixed(1) + 's' : null,
           boss: fight && fight.active ? fight.name + ' hp' + fight.hp : null,
           escaped: escaped.length
         };
@@ -3202,6 +3285,9 @@
          the grid / dpr / level accent re-bakes the cache */
       bgInfo: function () {
         return bgCacheKey;
+      },
+      spawnHunter: function () {
+        if (state === 'playing') spawnHunter(); // SPEC §29: QA-стенд
       },
       feed: function () { const c = cellAhead(2); if (c) food = { x: c.x, y: c.y }; },
       grow: function (n) { growth += n || 5; },

@@ -95,7 +95,6 @@
   const ERR_DECAY = 0.12;         // базовая постоянная гашения, s
   const ERR_CAP = 14;              // потолок смещения на сегмент, клеток
   const SNAP_CELLS = 18;          // катастрофа (в среднем на сегмент) — прыжок
-  const PING_WINDOW = 15;         // окно оценки one-way, снапшотов
 
   const DIR = {
     up: { x: 0, y: -1 },
@@ -156,14 +155,14 @@
   let inputLog = [];           // [{seq, tick, dirName}] — для реплея
   let snapBuf = [];            // соперник: [{tk, pts[{x,y}], dir}] по tk
   let arenaInfo = null;        // снапшотное {k,s,e} секрета арены
+  let roundGoPlayed = false;  // сторож дубля «GO» на джиттере фаз
   let lastTk = -1;             // tk последнего применённого снапшота
   let mySq = 0;                // последний подтверждённый seq
   let delayTicks = LEAD_DEFAULT; // интерполяционная задержка, тиков
   let offRows = [];            // гаснущие визуальные смещения [{x,y}]
   let offMag = 0;              // QA: суммарная величина смещения
-  let pingMs = 0;              // оценка RTT по меткам времени
+  let pingMs = 0;              // честный RTT (эхо ping/pong из net.js)
   let pingKnown = false;
-  let offSamples = [];         // arrive−st, окно для минимума
 
   /* ---------- helpers ---------- */
 
@@ -397,6 +396,21 @@
   /* ---------- неткод v2: таймлайн, предсказание, реплей ---------- */
 
   function idx(x, y) { return y * GW + x; }
+
+  /* RTT от транспорта; в бою опрашивается каждый кадр (дёшево) */
+  function pollPing() {
+    try {
+      if (CS.Net && typeof CS.Net.rttMs === 'function') {
+        const r = Number(CS.Net.rttMs());
+        if (r > 0) {
+          pingMs = pingKnown ? pingMs * 0.8 + r * 0.2 : r;
+          pingKnown = true;
+        }
+      }
+    } catch (e) {
+      /* нет транспорта — нет пинга */
+    }
+  }
 
   /* СЕКРЕТ АРЕНЫ (SPEC §14/§22): зеркало серверной маски duel-core.js —
      математика 1:1, менять только парой. Тиковая детерминированность =
@@ -655,28 +669,17 @@
     offRows = [];
     offMag = 0;
     arenaInfo = null; // новый раунд — арена с чистого листа
+    roundGoPlayed = false;
   }
 
   function applySnapshot(d) {
     if (!d || typeof d !== 'object' || !Array.isArray(d.sn)) return;
     snapAge = 0;
-    const arrive = Date.now();
     const prevPhase = phase;
-
-    /* оценка one-way: смещение часов = arrive − st; минимум за окно
-       ≈ чистая задержка пересылки; пинг = 2 × one-way (T27.3) */
-    if (Number.isFinite(d.st)) {
-      offSamples.push(arrive - d.st);
-      if (offSamples.length > PING_WINDOW) offSamples.shift();
-      let mn = offSamples[0];
-      for (let i = 1; i < offSamples.length; i++) {
-        if (offSamples[i] < mn) mn = offSamples[i];
-      }
-      const oneWay = Math.max(0, (arrive - d.st) - mn);
-      const rtt = 2 * oneWay;
-      pingMs = pingKnown ? pingMs * 0.8 + rtt * 0.2 : rtt;
-      pingKnown = true;
-    }
+    /* аудит-стресс поймал: ст-оценщик мерил только ДЖИТТЕР (базовая
+       задержка срезалась минимумом окна) — пинг 8-70мс при истине
+       200-800. Честный RTT теперь идёт эхом ping/pong (net.js), здесь
+       только сглаживание опроса в update() */
 
     /* авторитарные змейки */
     for (let i = 0; i < 2; i++) {
@@ -707,11 +710,16 @@
     roundWinner = Number.isFinite(d.w) ? d.w : null;
     phase = typeof d.ph === 'string' ? d.ph : phase;
     if (Number.isFinite(d.pt)) phaseTimer = d.pt;
-    /* секрет арены: снапшот — единственный источник правды */
-    arenaInfo = (d.ar && typeof d.ar.k === 'string' &&
-      Number.isFinite(d.ar.s) && Number.isFinite(d.ar.e))
-      ? { k: d.ar.k === 'circle' ? 'circle' : 'pulse', s: d.ar.s, e: d.ar.e }
-      : null;
+    /* секрет арены: снапшот — единственный источник правды. Аудит:
+       устаревший снапшот (tk < lastTk, бёрст-доставка) не должен
+       откатывать свежий секрет нулевым ar */
+    const arTk = Number.isFinite(d.tk) ? (d.tk | 0) : -1;
+    if (arTk >= lastTk) {
+      arenaInfo = (d.ar && typeof d.ar.k === 'string' &&
+        Number.isFinite(d.ar.s) && Number.isFinite(d.ar.e))
+        ? { k: d.ar.k === 'circle' ? 'circle' : 'pulse', s: d.ar.s, e: d.ar.e }
+        : null;
+    }
 
     /* вход в отсчёт (новый раунд): сетевой таймлайн с чистого листа.
        Только на ПЕРЕХОДЕ — повороты, нажатые во время отсчёта,
@@ -729,7 +737,8 @@
     } else {
       guestLastCount = -1;
     }
-    if (phase === 'fight' && prevPhase !== 'fight') {
+    if (phase === 'fight' && prevPhase !== 'fight' && !roundGoPlayed) {
+      roundGoPlayed = true; // аудит: джиттер countdown↔fight не дублирует «GO»
       setBanner('dReady', 0.8, '#00ff9d');
       sfx('duelGo');
     }
@@ -910,11 +919,16 @@
         phase = 'fight';
         phaseTimer = 0;
         fightTime = 0;
-        setBanner('dReady', 0.8, '#00ff9d');
-        sfx('duelGo');
+        if (!roundGoPlayed) {
+          roundGoPlayed = true;
+          setBanner('dReady', 0.8, '#00ff9d');
+          sfx('duelGo');
+        }
       }
     } else if (phase === 'fight') {
       fightTime += dt; // T27b: identity label timings
+
+      pollPing(); // честный RTT от транспорта (эхо ping/pong), EMA
 
       /* неткод v2: голодание — таймлайн замирает, чтобы после
          бёрста снапшотов не лететь наперёд вслепую */
@@ -1425,7 +1439,6 @@
       inputSeq = 0;
       pingMs = 0;
       pingKnown = false;
-      offSamples = [];
       delayTicks = LEAD_DEFAULT;
       snakes = [makeSnake(3, 3, DIR.right, 1), makeSnake(6, 3, DIR.left, 1)];
       live = true;

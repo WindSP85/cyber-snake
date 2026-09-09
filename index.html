@@ -400,7 +400,7 @@
 
   <!-- Scripts: cloud config first, then i18n, then the SPEC §7 order -->
   <!-- Official Telegram Mini App SDK: загружается только онлайн, вне Telegram отсутствует и на игру не влияет -->
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script defer src="https://telegram.org/js/telegram-web-app.js"></script>
   <!-- PWA: офлайн-режим и установка на домашний экран (на file:// тихо не работает) -->
   <script>
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
@@ -409,30 +409,30 @@
     });
   }
   </script>
-  <script src="js/config.js"></script>
-  <script src="js/i18n.js"></script>
-  <script src="js/audio.js"></script>
-  <script src="js/bosses.js"></script>
-  <script src="js/fx.js"></script>
-  <script src="js/leaderboard.js"></script>
-  <script src="js/telegram.js"></script>
+  <script defer src="js/config.js"></script>
+  <script defer src="js/i18n.js"></script>
+  <script defer src="js/audio.js"></script>
+  <script defer src="js/bosses.js"></script>
+  <script defer src="js/fx.js"></script>
+  <script defer src="js/leaderboard.js"></script>
+  <script defer src="js/telegram.js"></script>
   <!-- feature T22: realtime transport for online duels (SPEC §22) — after telegram, before ui; touches the network only on demand -->
-  <script src="js/net.js"></script>
+  <script defer src="js/net.js"></script>
   <!-- SPEC §22: ядро дуэли без интерфейса — общее для клиента и сервера -->
-  <script src="js/duel-core.js"></script>
+  <script defer src="js/duel-core.js"></script>
   <!-- feature T23: the duel simulation core (SPEC §22) — after net, before game; renders inside the 'duel' game state -->
-  <script src="js/duel.js"></script>
+  <script defer src="js/duel.js"></script>
   <!-- feature T16: achievements (SPEC §16) — after leaderboard, before ui -->
-  <script src="js/achievements.js"></script>
+  <script defer src="js/achievements.js"></script>
   <!-- feature T17: skins (SPEC §17) — after achievements, before ui -->
-  <script src="js/skins.js"></script>
+  <script defer src="js/skins.js"></script>
   <!-- feature T19: meta-progression upgrades (SPEC §19) — after skins, before ui -->
-  <script src="js/upgrades.js"></script>
+  <script defer src="js/upgrades.js"></script>
   <!-- feature T20: daily challenge (SPEC §20) — after upgrades, before ui -->
-  <script src="js/daily.js"></script>
+  <script defer src="js/daily.js"></script>
   <!-- SPEC §28: ПВП-задания (дейлик + недельный) — after daily, before duelui -->
-  <script src="js/quests.js"></script>
-  <script src="js/ui.js"></script>
+  <script defer src="js/quests.js"></script>
+  <script defer src="js/ui.js"></script>
   <!-- SPEC §13: единственный входной диалог ника — Telegram-игроку
        без ника (только айди); после выбора привязан к айди навсегда -->
   <div id="nick-dialog" class="nick-dialog hidden">
@@ -446,7 +446,7 @@
     </div>
   </div>
   <!-- feature T24: the duel lobby ui (SPEC §22) — after ui, before game -->
-  <script src="js/duelui.js"></script>
-  <script src="js/game.js"></script>
+  <script defer src="js/duelui.js"></script>
+  <script defer src="js/game.js"></script>
 </body>
 </html>

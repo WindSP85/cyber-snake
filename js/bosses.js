@@ -1088,14 +1088,11 @@
       if (this.bossCycle > 0) {
         g.strokeStyle = skin.ring;
         g.lineWidth = 2;
-        g.shadowColor = skin.ring;
-        g.shadowBlur = 8;
         g.globalAlpha = 0.75 + 0.25 * Math.sin(this.time * 4);
         g.beginPath();
         g.arc(cx, cy, cell * 1.04 + Math.sin(this.time * 3) * 1.5, 0, Math.PI * 2);
         g.stroke();
-        g.globalAlpha = 1;
-        g.shadowBlur = 0;
+        g.globalAlpha = 1; // аудит-перф: blur снят (редкий кейс mk-цикла)
       }
     }
 
@@ -1108,8 +1105,8 @@
       g.save();
       g.translate(cx, cy);
       g.rotate(Math.sin(this.time * 0.7) * 0.12);  // slow crystal tilt
-      g.shadowColor = skin.ring;
-      g.shadowBlur = 14 + pulse * 8 + tele * 20;
+      /* аудит-перф: blur заменён печёным halo-спрайтом (LRU по цвету) */
+      drawGlow(g, 0, 0, wB * (2.4 + tele * 0.6), wB * (2.4 + tele * 0.6), skin.ring, 16 + tele * 12);
       const grad = g.createRadialGradient(0, 0, cell * 0.15, 0, 0, wB);
       grad.addColorStop(0, skin.c1 + (0.55 + tele * 0.35).toFixed(3) + ')');
       grad.addColorStop(1, skin.c2);
@@ -1118,7 +1115,6 @@
       g.moveTo(0, -hB); g.lineTo(wB, 0); g.lineTo(0, hB); g.lineTo(-wB, 0);
       g.closePath();
       g.fill();
-      g.shadowBlur = 0;
       g.lineWidth = 2;
       g.strokeStyle = skin.ring;
       g.stroke();
@@ -1135,13 +1131,11 @@
       g.stroke();
       g.globalAlpha = 1;
       const eyeR = cell * 0.3 * (1 + tele * 0.12);  // the eye itself
-      g.shadowColor = skin.ring;
-      g.shadowBlur = 8 + tele * 12;
+      drawGlow(g, 0, 0, eyeR * 5, eyeR * 5, skin.ring, 10 + tele * 10); // аудит-перф
       g.fillStyle = '#0a0410';
       g.beginPath();
       g.arc(0, 0, eyeR, 0, Math.PI * 2);
       g.fill();
-      g.shadowBlur = 0;
       g.stroke();
       g.fillStyle = hot ? skin.ring : skin.pupil;
       g.beginPath();
@@ -1156,8 +1150,8 @@
       g.save();
       g.translate(cx, cy);
       const coreR = cell * (0.6 + pulse * 0.07 + tele * 0.05);
-      g.shadowColor = skin.ring;
-      g.shadowBlur = 14 + pulse * 8 + tele * 20;
+      /* аудит-перф: печёный halo вместо покадрового blur */
+      drawGlow(g, 0, 0, coreR * 4.4, coreR * 4.4, skin.ring, 16 + tele * 12);
       const grad = g.createRadialGradient(0, -coreR * 0.25, cell * 0.1, 0, 0, coreR);
       grad.addColorStop(0, skin.c1 + (0.55 + tele * 0.35).toFixed(3) + ')');
       grad.addColorStop(1, skin.c2);
@@ -1165,7 +1159,6 @@
       g.beginPath();
       g.arc(0, 0, coreR, 0, Math.PI * 2);
       g.fill();
-      g.shadowBlur = 0;
       g.lineWidth = 2;
       g.strokeStyle = skin.ring;
       g.stroke();
@@ -1237,13 +1230,12 @@
             ? 0.8 + pulse * 0.2
             : Math.max(0, Math.sin(this.time * 2.8 + (i * 3 + j) * 1.9));
           if (center) {
-            g.shadowColor = skin.ring;
-            g.shadowBlur = 10 + tele * 14;
+            drawGlow(g, (i - 1) * step + ox, (j - 1) * step + oy,
+              s * 4.5, s * 4.5, skin.ring, 12 + tele * 10); // аудит-перф
           }
           g.fillStyle = skin.c1 + (0.3 + 0.7 * b).toFixed(3) + ')';
           roundRectPath(g, (i - 1) * step + ox - s / 2, (j - 1) * step + oy - s / 2, s, s, 3);
           g.fill();
-          if (center) g.shadowBlur = 0;
           g.globalAlpha = Math.min(1, 0.55 + 0.45 * b + tele * 0.3);
           g.stroke();
           g.globalAlpha = 1;
@@ -1264,8 +1256,7 @@
       g.save();
       g.translate(cx, cy);
       g.rotate(this.sawAngle);
-      g.shadowColor = line;
-      g.shadowBlur = 10 + pulse * 6 + tele * 18;
+      drawGlow(g, 0, 0, rTip * 4.6, rTip * 4.6, line, 12 + tele * 12); // аудит-перф
       g.fillStyle = skin.c2;
       g.beginPath();
       for (let t = 0; t < N; t++) {                 // toothed rim
@@ -1277,7 +1268,6 @@
       }
       g.closePath();
       g.fill();
-      g.shadowBlur = 0;
       g.lineWidth = 2;
       g.strokeStyle = line;
       g.stroke();
@@ -1321,8 +1311,7 @@
       g.translate(cx, cy);
       g.lineWidth = 2;
       g.strokeStyle = skin.ring;
-      g.shadowColor = skin.ring;
-      g.shadowBlur = 10 + pulse * 6 + tele * 16;
+      drawGlow(g, 0, 0, cell * 3.6, cell * 3.6, skin.ring, 12 + tele * 10); // аудит-перф
       g.fillStyle = skin.c2;                        // trapezoid mount
       g.beginPath();
       g.moveTo(-cell * 0.78, cell * 0.72);
@@ -1349,13 +1338,11 @@
       g.fillRect(cell * 0.74, -cell * 0.2, cell * 0.22, cell * 0.4);  // muzzle
       g.strokeRect(cell * 0.74, -cell * 0.2, cell * 0.22, cell * 0.4);
       if (hot) {                                    // charged muzzle dot
-        g.shadowColor = '#ffe600';
-        g.shadowBlur = 12;
+        drawGlow(g, cell * 0.96, 0, cell * 0.9, cell * 0.9, '#ffe600', 12); // аудит-перф
         g.fillStyle = '#ffe600';
         g.beginPath();
         g.arc(cell * 0.96, 0, cell * 0.08 * (1 + tele * 0.5), 0, Math.PI * 2);
         g.fill();
-        g.shadowBlur = 0;
       }
       g.restore();
     }
@@ -1387,15 +1374,13 @@
       for (let s = -1; s <= 1; s += 2) {            // two crescent jaws
         const a0 = s * open;
         const a1 = s * (open + span);
-        g.shadowColor = skin.ring;
-        g.shadowBlur = 12 + pulse * 6 + tele * 16;
+        drawGlow(g, 0, 0, rOut * 4.4, rOut * 4.4, skin.ring, 12 + tele * 12); // аудит-перф
         g.fillStyle = skin.c2;
         g.beginPath();
         g.arc(0, 0, rOut, Math.min(a0, a1), Math.max(a0, a1));
         g.arc(0, 0, rIn, Math.max(a0, a1), Math.min(a0, a1), true);
         g.closePath();
         g.fill();
-        g.shadowBlur = 0;
         g.stroke();
       }
       g.fillStyle = skin.pupil;                     // four teeth per jaw
@@ -1441,8 +1426,8 @@
         g.stroke();
         g.globalAlpha = 1;
       }
-      g.shadowColor = skin.ring;                    // icy nucleus
-      g.shadowBlur = 12 + pulse * 8 + tele * 16 + chill * 14;
+      drawGlow(g, 0, 0, cell * 1.7 + chill * cell, cell * 1.7 + chill * cell,
+        skin.ring, 12 + tele * 12);                 // аудит-перф: icy nucleus
       g.fillStyle = chill > 0.05 ? '#eafaff' : skin.pupil;
       g.beginPath();
       g.arc(0, 0, cell * 0.22 * (1 + pulse * 0.15 + chill * 0.2), 0, Math.PI * 2);
@@ -1460,8 +1445,7 @@
       const bh = cell * 1.3;
       g.save();
       g.translate(cx, cy + cell * 0.08);
-      g.shadowColor = skin.ring;
-      g.shadowBlur = 12 + pulse * 6 + tele * 18;
+      drawGlow(g, 0, 0, bw * 3.2, bh * 3.8, skin.ring, 12 + tele * 14); // аудит-перф
       g.fillStyle = skin.c2;                        // bezel
       roundRectPath(g, -bw / 2, -bh / 2, bw, bh, 6);
       g.fill();
@@ -1510,8 +1494,8 @@
       g.lineTo(0, -bh / 2 - cell * 0.3);
       g.stroke();
       const blink = 0.5 + 0.5 * Math.sin(this.time * 6);
-      g.shadowColor = '#00f0ff';
-      g.shadowBlur = 6 + blink * 8;
+      drawGlow(g, 0, -bh / 2 - cell * 0.34, cell * 0.8, cell * 0.8,
+        '#00f0ff', 6 + blink * 8); // аудит-перф: огонёк антенны
       g.fillStyle = '#00f0ff';
       g.beginPath();
       g.arc(0, -bh / 2 - cell * 0.34, cell * 0.07 * (0.7 + blink * 0.5), 0, Math.PI * 2);
@@ -1546,13 +1530,13 @@
         const flicker = 0.9 + 0.1 * Math.sin(this.time * 60);
         const th = cell * 0.9 * flicker;
         const inner = th * 0.62;
-        // cyan rim
-        g.shadowColor = '#00f0ff';
-        g.shadowBlur = 24;
+        // cyan rim — широкая полупрозрачная подложка вместо blur (аудит)
+        g.fillStyle = 'rgba(0,240,255,0.28)';
+        if (row) g.fillRect(0, this.ripper.index * cell + (cell - th * 1.8) / 2, W, th * 1.8);
+        else g.fillRect(this.ripper.index * cell + (cell - th * 1.8) / 2, 0, th * 1.8, H);
         g.fillStyle = 'rgba(0,240,255,0.85)';
         if (row) g.fillRect(0, this.ripper.index * cell + (cell - th) / 2, W, th);
         else g.fillRect(this.ripper.index * cell + (cell - th) / 2, 0, th, H);
-        g.shadowBlur = 0;
         // white core
         g.fillStyle = '#ffffff';
         if (row) g.fillRect(0, this.ripper.index * cell + (cell - inner) / 2, W, inner);
@@ -1581,9 +1565,8 @@
       g.stroke();
       g.setLineDash([]);
       const r = cell * (0.45 + 0.2 * blink);
+      drawGlow(g, tx, ty, r * 3.4, r * 3.4, '#ff7a00', 10); // аудит-перф
       g.strokeStyle = '#ff7a00';
-      g.shadowColor = '#ff7a00';
-      g.shadowBlur = 10;
       g.beginPath();
       g.arc(tx, ty, r, 0, Math.PI * 2);
       g.stroke();
@@ -1715,11 +1698,12 @@
         g.save();
         g.strokeStyle = 'rgba(125,227,255,' + (0.3 + 0.5 * blink).toFixed(3) + ')';
         g.lineWidth = 3;
-        g.shadowColor = '#7de3ff';
-        g.shadowBlur = 14;
         g.beginPath();
         g.arc(cx, cy, r, 0, Math.PI * 2);
         g.stroke();
+        g.lineWidth = 1;
+        g.strokeStyle = 'rgba(4,5,12,0.4)';
+        g.stroke(); // двойной штрих вместо blur (аудит-перф)
         g.restore();
       }
       if (this.freezeWave > 0) {
@@ -1733,8 +1717,6 @@
         g.globalAlpha = this.freezeWave;
         g.strokeStyle = '#7de3ff';
         g.lineWidth = 6 * this.freezeWave + 2;
-        g.shadowColor = '#7de3ff';
-        g.shadowBlur = 18;
         g.beginPath();
         g.arc(cx, cy, k * maxR, 0, Math.PI * 2);
         g.stroke();
@@ -1768,12 +1750,12 @@
         const flicker = 0.9 + 0.1 * Math.sin(this.time * 60);
         const th = cell * 0.6 * flicker;
         const core = cell * 0.2 * flicker;
-        g.shadowColor = '#ff2d55';
-        g.shadowBlur = 26;
+        g.fillStyle = 'rgba(255,45,85,0.3)'; // подложка вместо blur (аудит)
+        if (row) g.fillRect(0, this.laser.index * cell + (cell - th * 1.7) / 2, W, th * 1.7);
+        else g.fillRect(this.laser.index * cell + (cell - th * 1.7) / 2, 0, th * 1.7, H);
         g.fillStyle = 'rgba(255,45,85,0.85)';
         if (row) g.fillRect(0, this.laser.index * cell + (cell - th) / 2, W, th);
         else g.fillRect(this.laser.index * cell + (cell - th) / 2, 0, th, H);
-        g.shadowBlur = 0;
         g.fillStyle = '#ffffff';
         if (row) g.fillRect(0, this.laser.index * cell + (cell - core) / 2, W, core);
         else g.fillRect(this.laser.index * cell + (cell - core) / 2, 0, core, H);
@@ -1850,8 +1832,7 @@
       g.save();
       g.translate(cx, cy);
       g.rotate(this.time * 1.4);
-      g.shadowColor = '#00ff9d';
-      g.shadowBlur = 10 + pulse * 10;
+      drawGlow(g, 0, 0, r * 3.6, r * 3.6, '#00ff9d', 10 + pulse * 8); // аудит-перф
       g.fillStyle = '#00ff9d';
       g.beginPath();
       g.moveTo(0, -r);

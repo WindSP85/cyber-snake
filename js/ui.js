@@ -34,7 +34,8 @@
   function setText(id, value) {
     const el = byId(id);
     if (el && value !== undefined && value !== null) {
-      el.textContent = String(value);
+      const str = String(value);
+      if (el.textContent !== str) el.textContent = str; // аудит: без пустых DOM-записей
     }
   }
 

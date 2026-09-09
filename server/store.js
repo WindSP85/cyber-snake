@@ -39,6 +39,7 @@ function Store(dir) {
   }
   this.scores = this._load('scores.json');
   this.duels = this._load('duels.json');
+  this._leadName = null; // кэш лидера общей таблицы (для лобби)
 }
 
 /* ---------- загрузка / сохранение ---------- */
@@ -63,7 +64,15 @@ Store.prototype._load = function (name) {
        файл прежде чем затереть сохраняем как .bad: разовая порча
        не должна молча стоить всей истории */
     try {
-      fs.renameSync(this._file(name), this._file(name + '.bad'));
+      /* с меткой времени: вторая порча не затирает первый бэкап
+         (аудит); последних 5 версий достаточно */
+      fs.renameSync(this._file(name), this._file(name + '.' + Date.now() + '.bad'));
+      const bads = fs.readdirSync(this.dir)
+        .filter(function (f) { return f.indexOf(name + '.') === 0 && f.slice(-4) === '.bad'; })
+        .sort();
+      for (let bi = 0; bi < bads.length - 5; bi++) {
+        try { fs.unlinkSync(path.join(this.dir, bads[bi])); } catch (e3) { /* мимо */ }
+      }
     } catch (e2) { /* файла не было или переименовать нельзя */ }
   }
   return [];
@@ -143,6 +152,7 @@ Store.prototype.addScore = function (entry) {
       if (row.score > r.score) {
         this.scores[i] = row;
         this._dirty.scores = true;
+        this._leadName = null; // лидер мог смениться
         this._schedule();
       }
       return true;
@@ -151,6 +161,7 @@ Store.prototype.addScore = function (entry) {
   this.scores.push(row);
   this._trimScores();
   this._dirty.scores = true;
+  this._leadName = null; // лидер мог смениться
   this._schedule();
   return true;
 };
@@ -180,6 +191,16 @@ Store.prototype.top = function (season, limit) {
   let rows = this.scores;
   if (season) rows = rows.filter(function (r) { return r.season === season; });
   return rows.slice().sort(function (a, b) { return b.score - a.score; }).slice(0, n);
+};
+
+/* лидер общей таблицы (без сезона) — кэш: полный sort на каждый пуш
+   лобби не нужен (аудит); инвалидация — в addScore */
+Store.prototype.leaderName = function () {
+  if (this._leadName === null) {
+    const top1 = this.top('', 1)[0];
+    this._leadName = top1 ? String(top1.name || '').toLowerCase() : '';
+  }
+  return this._leadName;
 };
 
 /* ---------- дуэли ---------- */

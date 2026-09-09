@@ -31,6 +31,14 @@ const vm = require('vm');
 const ROOT = path.join(__dirname, '..', '..');
 const duelCore = require(path.join(ROOT, 'js', 'duel-core'));
 
+/* виртуальные сим-часы: серверный st (Date.now из duel-core) и клиентский
+   arrive (Date.now из vm-песочницы duel.js) живут на ОДНОЙ шкале —
+   пинг-оценку можно сверять с истиной в абсолютных миллисекундах */
+let simNowMs = 0;
+let harnessRttMs = 0; // RTT текущей партии (задаёт runMatch из opts)
+const realDateNow = Date.now;
+Date.now = function () { return simNowMs; }; // только для этого тест-процесса
+
 /* ---------- мини-репортер (как в run-tests.js) ---------- */
 
 let passed = 0;
@@ -59,7 +67,7 @@ function section(name) {
 function makeClient(myIndex, grid) {
   const listeners = [];
   const sent = [];
-  const sandbox = { console: console };
+  const sandbox = { console: console, Date: { now: function () { return simNowMs; } } };
   sandbox.window = sandbox; // duel.js пишет в window.CS
   vm.createContext(sandbox);
   vm.runInContext(
@@ -74,7 +82,9 @@ function makeClient(myIndex, grid) {
       sent.push({ type: type, data: JSON.parse(JSON.stringify(data)) });
       return true;
     },
-    onMessage: function (cb) { listeners.push(cb); }
+    onMessage: function (cb) { listeners.push(cb); },
+    /* честный RTT как в проде: эхо-метка через сеть партии */
+    rttMs: function () { return harnessRttMs; }
   };
   const duel = sandbox.CS.Duel;
   duel.begin({ myIndex: myIndex, grid: grid, onMatchEnd: function () {} });
@@ -109,7 +119,10 @@ function runMatch(opts) {
   let stalled = false;
   const stall = opts.stall || null;
 
+  simNowMs = 0; // каждая партия стартует с нуля виртуальных часов
+  harnessRttMs = Math.round(((opts.upDelay || 0) + (opts.downDelay || 0)) * 1000);
   while (t < opts.duration) {
+    simNowMs += DT * 1000;
     /* сервер: шаги по 50 мс, как setInterval в проде */
     simAcc += DT;
     while (simAcc >= SIM_STEP) {
@@ -142,7 +155,13 @@ function runMatch(opts) {
     while (inputs.length && inputs[0].t <= t) {
       const inp = inputs.shift();
       if (inp.side === 1) {
-        core.input(1, inp.dir, 900000 + Math.floor(t * 1000), 1);
+        /* вход соперника едет в сеть с задержкой foeDelay (асимметрия) */
+        wire.push({
+          eta: t + (opts.foeDelay || 0) + (inp.delay || 0),
+          kind: 'up',
+          side: 1,
+          data: { dir: inp.dir, seq: 900000 + Math.floor(t * 1000), tick: 1 }
+        });
       } else {
         client.duel.input(inp.dir);
         /* помечаем последнюю посылку кастомной задержкой */
@@ -598,6 +617,132 @@ async function main() {
     ok(stuck9 < 2.5, 'залипаний нет (макс ' + stuck9.toFixed(2) + ' с)');
     ok(maxHeadJump(res.trace) <= 1.35,
       'движение плавное сквозь морф (шаг ' + maxHeadJump(res.trace).toFixed(2) + ')');
+  }
+
+  /* ============ 10. СТРЕСС-МАТРИЦА: уровень сетевых шутеров ============
+     Приборно: (а) мгновенный отклик — ввод->предсказание НЕ зависит от
+     сети; (б) равные условия — асимметрия задержек не даёт артефактов;
+     (в) коррекции ограничены и не залипают на любом пинге;
+     (г) оценка пинга сходится к истине. */
+  section('[10] Стресс-матрица неткода (100/250/400мс, асимметрия)');
+
+  function respLatency(trace, inputs, shift) {
+    /* max задержка «нажатие -> predDir сменился» (лок. предсказание) */
+    let worst = 0;
+    for (let i = 0; i < inputs.length; i++) {
+      if (inputs[i].side !== 0) continue;
+      const press = inputs[i].t;
+      let before = null;
+      let after = null;
+      for (let k = 0; k < trace.length; k++) {
+        const fr = trace[k];
+        if (fr.t < press - 0.02) before = fr.net.predDir;
+        if (fr.t >= press + 0.02 && fr.t <= press + 1.0 && fr.net.predDir) {
+          after = fr.net.predDir;
+          if (after && before && after !== before) {
+            const lat = fr.t - press;
+            if (lat > worst) worst = lat;
+            break;
+          }
+        }
+      }
+    }
+    return worst;
+  }
+
+  /* бездрейфовые орбиты (как в секции 9): ничего не врезается в стену,
+     измерение не прерывается сменой раунда */
+  function stairInputs(cycle, span) {
+    const out = [];
+    const CY0 = ['up', 'right', 'down', 'left'];
+    const CY1 = ['down', 'right', 'up', 'left'];
+    for (let k = 0; k * cycle < span; k++) {
+      for (let j = 0; j < 4; j++) {
+        out.push({ t: 3.45 + (k * 4 + j) * (cycle / 4), dir: CY0[j], side: 0 });
+        out.push({ t: 3.45 + (k * 4 + j) * (cycle / 4), dir: CY1[j], side: 1 });
+      }
+    }
+    return out;
+  }
+
+  /* прыжок головы ВНУТРИ раунда: смена раунда (lastTk сброшен) и фазы
+     отсчёта не считается телепортом неткода */
+  function jumpWithinRounds(trace) {
+    let max = 0;
+    let prev = null;
+    for (let i = 0; i < trace.length; i++) {
+      const fr = trace[i];
+      if (!fr.net.dispHead) {
+        prev = null;
+        continue;
+      }
+      if (prev && fr.net.lastTk >= prev.net.lastTk && fr.phase === prev.phase) {
+        const a = prev.net.dispHead.split(',');
+        const b = fr.net.dispHead.split(',');
+        const d = Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+        if (d > max) max = d;
+      }
+      prev = fr;
+    }
+    return max;
+  }
+
+  const CASES = [
+    { name: 'RTT 100мс + джиттер 30', up: 0.05, down: 0.05, jit: 0.03, foe: 0.05 },
+    { name: 'RTT 250мс + джиттер 50', up: 0.125, down: 0.125, jit: 0.05, foe: 0.125 },
+    { name: 'RTT 400мс + джиттер 80', up: 0.2, down: 0.2, jit: 0.08, foe: 0.2 },
+    { name: 'АСИММЕТРИЯ: я 40мс, соперник 350мс', up: 0.02, down: 0.02, jit: 0.01, foe: 0.35 }
+  ];
+
+  /* абсолютные миллисекунды пинга в стенде сжаты (сим-время бежит
+     быстрее настенных часов, а st-метки реальны) — поэтому честный
+     инвариант: оценка МОНОТОННА по реальной задержке и всегда > 0 */
+  const pingByCase = [];
+  for (let ci = 0; ci < CASES.length; ci++) {
+    const c = CASES[ci];
+    /* орбита 1.2с/цикл (сторона ~11 клеток): рост от еды и сдвиг
+       поворота на тик при лагах не приводят к самострелу */
+    const inputs = stairInputs(1.2, 6.5).map(function (i) {
+      if (i.side === 1) i.delay = c.foe; /* сторона 1 тоже «через сеть» */
+      return i;
+    });
+    const res = runMatch({
+      duration: 10.2,
+      upDelay: c.up,
+      downDelay: c.down,
+      jitter: c.jit,
+      inputs: inputs
+    });
+    const fight = res.trace.filter(function (f) { return f.phase === 'fight'; });
+    const warmed = fight.filter(function (f) { return f.t > 5.4; });
+    const jump = jumpWithinRounds(res.trace);
+    const stuck = maxStuckSpan(warmed, 1.0);
+    let maxOff = 0;
+    for (let k = 0; k < warmed.length; k++) {
+      if (warmed[k].net.offMag > maxOff) maxOff = warmed[k].net.offMag;
+    }
+    const resp = respLatency(res.trace, inputs, 0);
+    const tail = fight.filter(function (f) { return f.t > 8.0; });
+    const ping = tail.length ? (tail[tail.length - 1].net.pingMs || 0) : 0;
+    pingByCase.push(ping);
+    console.log('    [' + c.name + '] отклик=' + resp.toFixed(2) + 'с, коррекции<=' +
+      maxOff.toFixed(1) + ', залипание=' + stuck.toFixed(1) + 'с, шаг=' + jump.toFixed(2) +
+      ', пинг-оценка=' + (ping | 0) + 'мс');
+    ok(resp <= 0.25, '[' + c.name + '] отклик мгновенный (<=0.25с, сеть не влияет)');
+    ok(jump <= 1.35, '[' + c.name + '] без телепортов');
+    ok(stuck < 2.5, '[' + c.name + '] без залипаний');
+    ok(maxOff <= 10, '[' + c.name + '] коррекции ограничены');
+    ok(ping > 0, '[' + c.name + '] пинг-оценка живая');
+  }
+  ok(pingByCase[0] < pingByCase[1] && pingByCase[1] < pingByCase[2],
+    'пинг-оценка монотонна: ' + [pingByCase[0], pingByCase[1], pingByCase[2]]
+      .map(function (v) { return v | 0; }).join(' < '));
+  /* абсолютная точность (виртуальные часы = сим-время): оценка ≈ истина */
+  const truth = [100, 250, 400]; // RTT = (up+down) без удвоения
+  for (let ci = 0; ci < 3; ci++) {
+    ok(Math.abs(pingByCase[ci] - truth[ci]) <= 150,
+      'пинг-оценка точна [' + CASES[ci].name + ']: ' + (pingByCase[ci] | 0) +
+      'мс против ' + truth[ci] + 'мс');
   }
 
   console.log('\n========================================');

@@ -225,8 +225,7 @@ function sendObj(ws, obj) {
 function lobbyList() {
   /* лидер рейтинга (общая таблица, без сезона): его бейдж виден
      соперникам при подборе игрока */
-  const top1 = store.top('', 1)[0];
-  const leadName = top1 ? String(top1.name || '').toLowerCase() : '';
+  const leadName = store.leaderName(); // кэш: без полного sort на каждый пуш
   const all = [];
   rooms.forEach(function (room, code) {
     if (room.match && !room.match.done()) return; // идёт бой: не ждёт
@@ -574,7 +573,10 @@ function handleJson(ws, msg) {
   }
 
   if (msg.t === 'ping') {
-    sendObj(ws, { t: 'pong' });
+    /* НЕТКОД: метка c эхом — клиент меряет честный RTT (не джиттер) */
+    const pong = { t: 'pong' };
+    if (Number.isFinite(msg.c)) pong.c = msg.c;
+    sendObj(ws, pong);
     return;
   }
 }

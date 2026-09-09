@@ -24,7 +24,7 @@
   /* ---------- constants ---------- */
 
   const JOIN_TIMEOUT = 10000;   // connect + server 'joined' budget, ms
-  const KEEPALIVE_EVERY = 12000; // app-level ping, keeps NAT alive
+  const KEEPALIVE_EVERY = 3000; // app-level ping: NAT живой + честный RTT
   const ROOM_LEN = 4;           // room code length
   const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I
   const ID_LEN = 8;             // random session id length
@@ -46,6 +46,7 @@
                            // socket events from a previous room die here
   const msgCbs = [];        // onMessage listeners
   const presenceCbs = [];   // onPresence listeners
+  let rttMs = 0;            // честный RTT по эху ping/pong (неткод)
 
   /* лобби ожидания: отдельный лёгкий сокет-наблюдатель */
   let lobbySocket = null;
@@ -220,6 +221,7 @@
     socket = null;
     roomCode = '';
     prevIds = null; // комната закрыта: diff отсчитывается заново
+    rttMs = 0;      // и RTT мерится заново
     joinSettled = true;
     joinDone = null;
     if (joinTimer) {
@@ -363,14 +365,21 @@
           return;
         }
 
-        if (msg.t === 'pong') return; // just liveness, nothing to do
+        if (msg.t === 'pong') {
+          /* RTT = now − эхо-метка; кламп от мусора */
+          if (Number.isFinite(msg.c)) {
+            const r = Date.now() - msg.c;
+            if (r >= 0 && r < 10000) rttMs = rttMs ? Math.round(rttMs * 0.6 + r * 0.4) : Math.round(r);
+          }
+          return;
+        }
       };
 
-      /* app-level keepalive: NAT routers love dropping idle
-         sockets; 12 s of silence is enough for some of them */
+      /* app-level keepalive + RTT-зонд: NAT routers love dropping
+         idle sockets, а эхо метки даёт честный пинг для неткода */
       keepaliveTimer = window.setInterval(function () {
         if (gen !== generation) return;
-        sendRaw({ t: 'ping' });
+        sendRaw({ t: 'ping', c: Date.now() });
       }, KEEPALIVE_EVERY);
     } catch (e) {
       done({ ok: false, error: 'no_client' });
@@ -537,6 +546,8 @@
     stopLobby: stopLobby,
     leave: leave,
     state: state,
-    myName: function () { return myName; }
+    myName: function () { return myName; },
+    /* честный RTT по протокольному ping/pong (0 — ещё не измерен) */
+    rttMs: function () { return rttMs; }
   };
 })();
